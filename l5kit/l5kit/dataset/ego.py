@@ -13,6 +13,8 @@ from l5kit.sampling.agent_sampling import generate_agent_sample
 from l5kit.sampling.agent_sampling_vectorized import generate_agent_sample_vectorized
 from l5kit.vectorization.vectorizer import Vectorizer
 
+from l5kit.geometry import transform_points
+
 
 class BaseEgoDataset(Dataset):
     def __init__(
@@ -74,6 +76,22 @@ class BaseEgoDataset(Dataset):
         data["host_id"] = np.uint8(convert_str_to_fixed_length_tensor(self.dataset.scenes[scene_index]["host"]).cpu())
         data["timestamp"] = frames[state_index]["timestamp"]
         data["track_id"] = np.int64(-1 if track_id is None else track_id)  # always a number to avoid crashing torch
+
+        # we can sample a negative trajectory and return the pixel index
+        # haolan: adding a negative_position entry
+        # 
+        data["negative_positions"] = data["target_positions"].copy()
+
+        import random
+        shooting_delta = random.randint(-6, 6)/10.0
+        delta = 0.05 if shooting_delta > 0 else -0.05
+        for i in range(len(data["negative_positions"])):
+            delta = delta + shooting_delta
+            data["negative_positions"][i][1] -= delta
+        
+        # also build image coordinate
+        data['target_positions_pixels'] = np.round(transform_points(data["target_positions"], data["raster_from_agent"]),0).astype(int)
+        data['negative_positions_pixels'] = np.round(transform_points(data["negative_positions"], data["raster_from_agent"]),0).astype(int)
 
         return data
 
