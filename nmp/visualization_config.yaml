@@ -26,7 +26,7 @@ raster_params:
   ego_center:
     - 0.25
     - 0.5
-  map_type: "box_debug"
+  map_type: "py_semantic"
 
   # the keys are relative to the dataset environment variable
   satellite_map_key: "aerial_map/aerial_map.png"
