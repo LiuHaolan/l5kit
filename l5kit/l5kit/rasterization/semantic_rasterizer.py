@@ -184,3 +184,33 @@ class SemanticRasterizer(Rasterizer):
 
     def num_channels(self) -> int:
         return 3
+
+    def augment_rasterize(
+            self,
+            history_frames: np.ndarray,
+            history_agents: List[np.ndarray],
+            history_tl_faces: List[np.ndarray],
+            agent: Optional[np.ndarray] = None,
+            random_shift = None
+    ) -> np.ndarray:
+        if agent is None:
+            ego_translation_m = history_frames[0]["ego_translation"]
+            ego_yaw_rad = rotation33_as_yaw(history_frames[0]["ego_rotation"])
+        else:
+            ego_translation_m = np.append(agent["centroid"], history_frames[0]["ego_translation"][-1])
+            ego_yaw_rad = agent["yaw"]
+
+        if random_shift != None:
+            ego_yaw_rad = ego_yaw_rad + random_shift
+
+        raster_from_world = self.render_context.raster_from_world(ego_translation_m, ego_yaw_rad)
+        world_from_raster = np.linalg.inv(raster_from_world)
+
+        # get XY of center pixel in world coordinates
+        center_in_raster_px = np.asarray(self.raster_size) * (0.5, 0.5)
+        center_in_world_m = transform_point(center_in_raster_px, world_from_raster)
+
+        sem_im = self.render_semantic_map(center_in_world_m, raster_from_world, history_tl_faces[0])
+        return sem_im.astype(np.float32) / 255
+
+

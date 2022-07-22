@@ -185,3 +185,65 @@ class BoxRasterizer(Rasterizer):
 
     def num_channels(self) -> int:
         return (self.history_num_frames + 1) * 2
+
+
+    def augment_rasterize(
+            self,
+            history_frames: np.ndarray,
+            history_agents: List[np.ndarray],
+            history_tl_faces: List[np.ndarray],
+            agent: Optional[np.ndarray] = None,
+            random_shift = None
+    ) -> np.ndarray:
+        """Generate raster image by rendering Ego & Agents as bounding boxes on the raster image.
+        Ego & Agents from different past frame are rendered at different image channel.
+
+        :param history_frames: A list of past frames to be rasterized
+        :param history_agents: A list of agents from past frames to be rasterized
+        :param history_tl_faces: A list of traffic light faces from past frames to be rasterized
+        :param agent: The selected agent to be rendered as Ego, if it is None the AV will be rendered as Ego
+        :return: An raster image of size [2xN] with Ego & Agents rendered as bounding boxes, where N is number of
+         history frames
+        """
+        # all frames are drawn relative to this one"
+        frame = history_frames[0]
+        if agent is None:
+            ego_translation_m = history_frames[0]["ego_translation"]
+            ego_yaw_rad = rotation33_as_yaw(frame["ego_rotation"])
+        else:
+            ego_translation_m = np.append(agent["centroid"], history_frames[0]["ego_translation"][-1])
+            ego_yaw_rad = agent["yaw"]
+
+        if random_shift is not None:
+            ego_yaw_rad = ego_yaw_rad + random_shift
+
+        raster_from_world = self.render_context.raster_from_world(ego_translation_m, ego_yaw_rad)
+
+        # this ensures we always end up with fixed size arrays, +1 is because current time is also in the history
+        out_shape = (self.raster_size[1], self.raster_size[0], self.history_num_frames + 1)
+        agents_images = np.zeros(out_shape, dtype=np.uint8)
+        ego_images = np.zeros(out_shape, dtype=np.uint8)
+
+        for i, (frame, agents) in enumerate(zip(history_frames, history_agents)):
+            agents = filter_agents_by_labels(agents, self.filter_agents_threshold)
+            # note the cast is for legacy support of dataset before April 2020
+            av_agent = get_ego_as_agent(frame).astype(agents.dtype)
+
+            if agent is None:
+                ego_agent = av_agent
+            else:
+                ego_agent = filter_agents_by_track_id(agents, agent["track_id"])
+                agents = np.append(agents, av_agent)  # add av_agent to agents
+                if len(ego_agent) > 0:  # check if ego_agent is in the frame
+                    agents = agents[agents != ego_agent[0]]  # remove ego_agent from agents
+
+            agents_images[..., i] = draw_boxes(self.raster_size, raster_from_world, agents, 255)
+            if len(ego_agent) > 0 and (self.render_ego_history or i == 0):
+                ego_images[..., i] = draw_boxes(self.raster_size, raster_from_world, ego_agent, 255)
+
+        # combine such that the image consists of [agent_t, agent_t-1, agent_t-2, ego_t, ego_t-1, ego_t-2]
+        out_im = np.concatenate((agents_images, ego_images), -1)
+
+        return out_im.astype(np.float32) / 255
+
+

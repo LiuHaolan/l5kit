@@ -39,9 +39,28 @@ class SemBoxRasterizer(Rasterizer):
             history_tl_faces: List[np.ndarray],
             agent: Optional[np.ndarray] = None,
     ) -> np.ndarray:
-        im_out_box = self.box_rast.rasterize(history_frames, history_agents, history_tl_faces, agent)
-        im_out_sem = self.sem_rast.rasterize(history_frames, history_agents, history_tl_faces, agent)
+        
+        im_out_box = self.box_rast.augment_rasterize(history_frames, history_agents, history_tl_faces, agent)
+        im_out_sem = self.sem_rast.augment_rasterize(history_frames, history_agents, history_tl_faces, agent)
         return np.concatenate([im_out_box, im_out_sem], -1)
+    
+    def augment_rasterize(
+            self,
+            history_frames: np.ndarray,
+            history_agents: List[np.ndarray],
+            history_tl_faces: List[np.ndarray],
+            agent: Optional[np.ndarray] = None,
+            random_shift = None
+    ) -> np.ndarray:
+        
+        import random
+        from math import pi
+        shift = random.uniform(0,2*pi)
+
+        im_out_box = self.box_rast.augment_rasterize(history_frames, history_agents, history_tl_faces, agent, shift)
+        im_out_sem = self.sem_rast.augment_rasterize(history_frames, history_agents, history_tl_faces, agent, shift)
+        return np.concatenate([im_out_box, im_out_sem], -1)
+
 
     def to_rgb(self, in_im: np.ndarray, **kwargs: dict) -> np.ndarray:
         im_out_box = self.box_rast.to_rgb(in_im[..., :-3], **kwargs)

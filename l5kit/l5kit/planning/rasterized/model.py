@@ -89,5 +89,16 @@ class RasterizedPlanningModel(nn.Module):
             pred_positions = predicted[:, :, :2]
             # [batch_size, num_steps, 1->(yaw)]
             pred_yaws = predicted[:, :, 2:3]
-            eval_dict = {"positions": pred_positions, "yaws": pred_yaws}
+            
+            targets = (torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)).view(
+                batch_size, -1
+            )
+            # [batch_size, num_steps]
+            target_weights = (data_batch["target_availabilities"].unsqueeze(-1) * self.weights_scaling).view(
+                batch_size, -1
+            )
+           
+            loss = torch.mean(self.criterion(outputs, targets) * target_weights)
+           
+            eval_dict = {"loss":loss, "positions": pred_positions, "yaws": pred_yaws}
             return eval_dict

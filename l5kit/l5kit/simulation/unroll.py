@@ -143,7 +143,7 @@ class ClosedLoopSimulator:
                  device: torch.device,
                  model_ego: Optional[torch.nn.Module] = None,
                  model_agents: Optional[torch.nn.Module] = None,
-                 keys_to_exclude: Tuple[str] = ("image",),
+                 keys_to_exclude: Tuple[str] = ("image","loss",),
                  mode: int = ClosedLoopSimulatorModes.L5KIT):
         """
         Create a simulation loop object capable of unrolling ego and agents

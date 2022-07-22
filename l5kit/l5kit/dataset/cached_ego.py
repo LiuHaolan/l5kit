@@ -22,11 +22,30 @@ from tqdm import tqdm
 import zlib
 import pickle
 
+def rasterize_proc(self, scene_index, state_index):
+    res = self.get_frame(scene_index, state_index)
+                
+    index = scene_index*self.k + frame_index
+    filename = os.path.join(self.cached_dir, str(index))
+    self.filename_list[index] = filename
+            
+                # compress the result
+    res = zlib.compress(pickle.dumps(res))
+    # no need to cache them in memory right now
+#    self.cached_item_list[index] = res
+            
+    file_handle = open(filename, "wb" )
+    pickle.dump(res, file_handle)
+    file_handle.close()
+
+
 class CachedBaseEgoDataset(Dataset):
     def __init__(
             self,
             cfg: dict,
             zarr_dataset: ChunkedDataset,
+            preprocessed_path: str,
+            k: int = 20
     ):
         """
         Get a PyTorch dataset object that can be used to train DNN
@@ -41,38 +60,69 @@ class CachedBaseEgoDataset(Dataset):
 
         # build a partial so we don't have to access cfg each time
         self.sample_function = self._get_sample_function()
-        
+       
+        # number of frames to pick up  
+        self.k = k
+
         # the in memory list that keeps the cached data.
         self.cached_item_list = [None]*self.__len__()
         self.filename_list = [None]*self.__len__()
-        self.cached_dir = "/home/haolan/Downloads/prediction_dataset/preprocessed"
-        
+        self.cached_dir = preprocessed_path
+        assert self.cached_dir is not None
+#        self.cached_dir = "/home/haolan/Downloads/prediction_dataset/preprocessed"
+       
         # if there is a pre-processed directory, read it into the memory.
-        
-         
-        # skip that part
-        
-        for index in tqdm(range(self.__len__())):
-            scene_index = bisect.bisect_right(self.cumulative_sizes, index)
+        if len(self) == len(os.listdir(self.cached_dir)):
+            print("Read preprocessed dataset into memory...")
+            for name in tqdm(os.listdir(self.cached_dir)):
+                idx = int(name)
+                self.filename_list[idx] = os.path.join(self.cached_dir, name)
+                
+                filename = self.filename_list[idx]
+                file_handle = open(filename, "rb" )
+                res = pickle.load(file_handle)
+                file_handle.close()
+#                res = pickle.loads(zlib.decompress(res))
+                self.cached_item_list[idx] = res
+            return
+    
+        print("not reading the dataset?")
+        return
 
+        # the sampled 
+        # skip that part
+        for scene_index in tqdm(range(len(self.dataset.scenes))):
             if scene_index == 0:
-                state_index = index
+                frame_num = self.cumulative_sizes[0]
             else:
-                state_index = index - self.cumulative_sizes[scene_index - 1]
-            res = self.get_frame(scene_index, state_index)
+                frame_num = self.cumulative_sizes[scene_index] - self.cumulative_sizes[scene_index-1]
+
+            frame_num = frame_num - 40
+
+#            pool = multiprocessing.Pool(20)
+#            processes = []
+
+            # starting from 20, till -20
+            for frame_index in range(self.k):
+                # maximum: 180
+                state_index = 20+int(frame_num/self.k) * frame_index
+#                processes.append(pool.apply_async(rasterize_proc, args=(self, scene_index, state_index)))
+#            _ = [p.get() for p in processes]
+                res = self.get_frame(scene_index, state_index)
+                
+                index = scene_index*self.k + frame_index
+                filename = os.path.join(self.cached_dir, str(index))
+                self.filename_list[index] = filename
             
-            filename = os.path.join(self.cached_dir, str(index))
+                # compress the result
+                res = zlib.compress(pickle.dumps(res))
+                # no need to cache them in memory right now
+                #    self.cached_item_list[index] = res
             
-            self.filename_list[index] = filename
-            
-            # compress the result
-            res = zlib.compress(pickle.dumps(res))
-            self.cached_item_list[index] = res
-            
-            file_handle = open(filename, "wb" )
-            pickle.dump(res, file_handle)
-            file_handle.close()
-        
+                file_handle = open(filename, "wb" )
+                pickle.dump(res, file_handle)
+                file_handle.close()
+
 
     def _get_sample_function(self) -> Callable[..., dict]:
         raise NotImplementedError()
@@ -86,7 +136,7 @@ class CachedBaseEgoDataset(Dataset):
             int: the number of elements in the dataset
         """
 #        return len(self.dataset.frames)
-        return len(self.dataset.scenes)
+        return len(self.dataset.scenes)*self.k
 
     def get_frame(self, scene_index: int, state_index: int, track_id: Optional[int] = None) -> dict:
         """
@@ -154,7 +204,18 @@ class CachedBaseEgoDataset(Dataset):
 
         if self.cached_item_list[index] is not None:
             return pickle.loads(zlib.decompress(self.cached_item_list[index]))
- 
+        
+        else:
+            # read from the predefined files
+            filename = self.filename_list[index]
+            file_handle = open(filename, "rb" )
+            res = pickle.load(file_handle)
+            file_handle.close()
+            res = pickle.loads(zlib.decompress(res))
+            return res
+
+        
+        # the following is not run
         """
         if index < 0:
             if -index > len(self):
@@ -237,6 +298,8 @@ class CachedEgoDataset(CachedBaseEgoDataset):
             zarr_dataset: ChunkedDataset,
             rasterizer: Rasterizer,
             perturbation: Optional[Perturbation] = None,
+            preprocessed_path: str = None,
+            k = 20
     ):
         """
         Get a PyTorch dataset object that can be used to train DNN
@@ -250,7 +313,7 @@ class CachedEgoDataset(CachedBaseEgoDataset):
         """
         self.perturbation = perturbation
         self.rasterizer = rasterizer
-        super().__init__(cfg, zarr_dataset)
+        super().__init__(cfg, zarr_dataset, preprocessed_path, k)
 
     def _get_sample_function(self) -> Callable[..., dict]:
         render_context = RenderContext(

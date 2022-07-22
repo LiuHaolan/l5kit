@@ -27,6 +27,17 @@ class Rasterizer(ABC):
     ) -> np.ndarray:
         pass
 
+    def augment_rasterize(
+            self,
+            history_frames: np.ndarray,
+            history_agents: List[np.ndarray],
+            history_tl_faces: List[np.ndarray],
+            agent: Optional[np.ndarray] = None,
+            random_shift = None
+    ) -> np.ndarray:
+        raise NotImplementedError
+
+
     @abstractmethod
     def to_rgb(self, in_im: np.ndarray, **kwargs: dict) -> np.ndarray:
         pass
