@@ -13,7 +13,7 @@ from l5kit.sampling.agent_sampling import generate_agent_sample
 from l5kit.sampling.agent_sampling_vectorized import generate_agent_sample_vectorized
 from l5kit.vectorization.vectorizer import Vectorizer
 
-from l5kit.geometry import transform_points
+from l5kit.geometry import transform_point, transform_points
 
 
 class BaseEgoDataset(Dataset):
@@ -226,6 +226,97 @@ class EgoDataset(BaseEgoDataset):
         dataset = self.dataset.get_scene_dataset(scene_index)
         return EgoDataset(self.cfg, dataset, self.rasterizer, self.perturbation)
 
+    def __getitem__(self, index: int) -> dict:
+        """
+        Function called by Torch to get an element
+
+        Args:
+        index (int): index of the element to retrieve
+
+        Returns: please look get_frame signature and docstring
+
+        """
+        if index < 0:
+            if -index > len(self):
+                raise ValueError("absolute value of index should not exceed dataset length")
+            index = len(self) + index
+
+        scene_index = bisect.bisect_right(self.cumulative_sizes, index)
+
+        if scene_index == 0:
+            state_index = index
+        else:
+            state_index = index - self.cumulative_sizes[scene_index - 1]
+        data = self.get_frame(scene_index, state_index)
+
+        # getting our customized data in 'get_additional
+        data = self.get_additional_info(data)
+        return data
+
+    def get_additional_info(self,data):
+        raster_from_world = data["raster_from_world"]
+        world_from_raster = np.linalg.inv(raster_from_world)
+
+        from l5kit.rasterization.semantic_rasterizer import indices_in_bounds
+    
+        rast = self.rasterizer
+        raster_radius = float(np.linalg.norm(rast.raster_size * rast.pixel_size)) / 2
+        center_in_raster_px = np.asarray(rast.raster_size) * (0.5, 0.5)
+        center_in_world = transform_point(center_in_raster_px, world_from_raster)
+        # TODO, raster_radius/4 to adjust target numbers
+        lane_indices = indices_in_bounds(center_in_world, rast.sem_rast.mapAPI.bounds_info["lanes"]["bounds"], raster_radius/4)
+
+        from l5kit.data.map_api import InterpolationMethod, MapAPI, TLFacesColors
+
+        from collections import defaultdict
+        from enum import IntEnum
+        from typing import Dict, List, Optional
+        
+        # TB Tested
+        INTERPOLATION_POINTS = 20
+        lanes_mask: Dict[str, np.ndarray] = defaultdict(lambda: np.zeros(len(lane_indices) * 2, dtype=np.bool))
+        lanes_area = np.zeros((len(lane_indices) * 2, INTERPOLATION_POINTS, 2))
+
+        
+        centerline_area = []
+        for idx, lane_idx in enumerate(lane_indices):
+            lane_idx = rast.sem_rast.mapAPI.bounds_info["lanes"]["ids"][lane_idx]
+            lane_dict = rast.sem_rast.mapAPI.get_lane_coords(lane_idx)
+    
+            xyz_left = lane_dict["xyz_left"]
+            xyz_right = lane_dict["xyz_right"]
+            xyz_center = (xyz_left+xyz_right)/2
+        
+            mid_steps = 5
+            xyz_center = rast.sem_rast.mapAPI.interpolate(xyz_center, mid_steps, InterpolationMethod.INTER_METER)
+            xyz_center = xyz_center[:,:2]
+            
+            # get_lane_as_interpolation is stateful function
+            # use stateless interpolate instead
+    
+            for p in xyz_center:
+                xy_point = transform_point(p, raster_from_world)
+                centerline_area.append(xy_point) 
+        
+        # needs to pad equally sized 300
+        MAX_GOAL_NUM = 500
+        assert len(centerline_area) < MAX_GOAL_NUM
+
+#        goal_matrix=np.zeros((len(centerline_area),2),dtype=int)
+        goal_matrix = np.zeros((MAX_GOAL_NUM,2),dtype=int)
+        for k in range(len(centerline_area)):
+            goal_matrix[k,:] = np.array([int(centerline_area[k][0]),int(centerline_area[k][1])])
+        data["goal_list"] = goal_matrix
+        data["goal_num"] = len(centerline_area)
+
+        # finding the closest target
+        gt_goal_positions_pixels = transform_point((data["target_positions"][-1,:2]), data["raster_from_agent"])
+        # needs to slice the goal list to avoid using the zero-padded entry
+        xy = (data["goal_list"][:len(centerline_area)]-gt_goal_positions_pixels)
+        data["goal_gt"] = np.argmin(np.linalg.norm(xy, axis=-1))
+
+        return data
+            
 
 class EgoDatasetVectorized(BaseEgoDataset):
     def __init__(
