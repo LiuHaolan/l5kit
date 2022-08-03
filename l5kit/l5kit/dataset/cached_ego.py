@@ -13,7 +13,7 @@ from l5kit.sampling.agent_sampling import generate_agent_sample
 from l5kit.sampling.agent_sampling_vectorized import generate_agent_sample_vectorized
 from l5kit.vectorization.vectorizer import Vectorizer
 
-from l5kit.geometry import transform_points
+from l5kit.geometry import transform_points, transform_point
 
 
 import os
@@ -70,19 +70,37 @@ class CachedBaseEgoDataset(Dataset):
         self.cached_dir = preprocessed_path
         assert self.cached_dir is not None
 #        self.cached_dir = "/home/haolan/Downloads/prediction_dataset/preprocessed"
-       
+
+#        self.additional_dir="/mnt/scratch/v_liuhaolan/additional"
+
+        print(len(self))
+        dirlen = len(os.listdir(self.cached_dir))
+        print("directory length: {}".format(dirlen))
         # if there is a pre-processed directory, read it into the memory.
-        if len(self) == len(os.listdir(self.cached_dir)):
+        if len(self) == dirlen:
             print("Read preprocessed dataset into memory...")
             for name in tqdm(os.listdir(self.cached_dir)):
                 idx = int(name)
+
                 self.filename_list[idx] = os.path.join(self.cached_dir, name)
                 
                 filename = self.filename_list[idx]
                 file_handle = open(filename, "rb" )
                 res = pickle.load(file_handle)
                 file_handle.close()
-#                res = pickle.loads(zlib.decompress(res))
+                
+                # read pre-processed and processed the additional info
+                
+       #         add_name = os.path.join(self.additional_dir, name)
+       #         add_handle = open(add_name, "wb")
+       #         decompressed_res = pickle.loads(zlib.decompress(res))
+       #         decompressed_res = self.get_additional_info_grid_goal(decompressed_res)
+       #         res = zlib.compress(pickle.dumps(decompressed_res))
+       #         pickle.dump(res, add_handle)  
+       #         add_handle.close()
+
+       #         file_handle.close()
+
                 self.cached_item_list[idx] = res
             return
     
@@ -203,8 +221,12 @@ class CachedBaseEgoDataset(Dataset):
         # if index already in memory, fetch it from the cached_item_list
 
         if self.cached_item_list[index] is not None:
-            return pickle.loads(zlib.decompress(self.cached_item_list[index]))
-        
+            data = pickle.loads(zlib.decompress(self.cached_item_list[index]))
+            
+            # the only place to call get_additional_info, needs to add to the rest place!
+            # TODO
+            # data = self.get_additional_info(data)
+            return data
         else:
             # read from the predefined files
             filename = self.filename_list[index]
@@ -244,6 +266,107 @@ class CachedBaseEgoDataset(Dataset):
         
         self.cached_item_list[index] = res
         return res
+
+    def get_additional_info(self,data):
+        raster_from_world = data["raster_from_world"]
+        world_from_raster = np.linalg.inv(raster_from_world)
+
+        from l5kit.rasterization.semantic_rasterizer import indices_in_bounds
+    
+        rast = self.rasterizer
+        raster_radius = float(np.linalg.norm(rast.raster_size * rast.pixel_size)) / 2
+        center_in_raster_px = np.asarray(rast.raster_size) * (0.5, 0.5)
+        center_in_world = transform_point(center_in_raster_px, world_from_raster)
+        # TODO, raster_radius/4 to adjust target numbers
+        lane_indices = indices_in_bounds(center_in_world, rast.sem_rast.mapAPI.bounds_info["lanes"]["bounds"], raster_radius/4)
+
+        from l5kit.data.map_api import InterpolationMethod, MapAPI, TLFacesColors
+
+        from collections import defaultdict
+        from enum import IntEnum
+        from typing import Dict, List, Optional
+        
+        # TB Tested
+        INTERPOLATION_POINTS = 20
+        lanes_mask: Dict[str, np.ndarray] = defaultdict(lambda: np.zeros(len(lane_indices) * 2, dtype=np.bool))
+        lanes_area = np.zeros((len(lane_indices) * 2, INTERPOLATION_POINTS, 2))
+
+        
+        centerline_area = []
+        for idx, lane_idx in enumerate(lane_indices):
+            lane_idx = rast.sem_rast.mapAPI.bounds_info["lanes"]["ids"][lane_idx]
+            lane_dict = rast.sem_rast.mapAPI.get_lane_coords(lane_idx)
+            
+            step = max((lane_dict["xyz_left"]).shape[0],(lane_dict["xyz_right"]).shape[0])
+
+            xyz_left = rast.sem_rast.mapAPI.interpolate(lane_dict["xyz_left"], step,InterpolationMethod.INTER_ENSURE_LEN)
+            xyz_right = rast.sem_rast.mapAPI.interpolate(lane_dict["xyz_left"], step,InterpolationMethod.INTER_ENSURE_LEN)
+            xyz_center = (xyz_left+xyz_right)/2
+        
+            mid_steps = 5
+            xyz_center = rast.sem_rast.mapAPI.interpolate(xyz_center, mid_steps, InterpolationMethod.INTER_METER)
+            xyz_center = xyz_center[:,:2]
+            
+            # get_lane_as_interpolation is stateful function
+            # use stateless interpolate instead
+    
+            for p in xyz_center:
+                xy_point = transform_point(p, raster_from_world)
+                centerline_area.append(xy_point) 
+        
+        # needs to pad equally sized 300
+        MAX_GOAL_NUM = 500
+        assert len(centerline_area) < MAX_GOAL_NUM
+
+#        goal_matrix=np.zeros((len(centerline_area),2),dtype=int)
+        goal_matrix = np.zeros((MAX_GOAL_NUM,2),dtype=int)
+        for k in range(len(centerline_area)):
+            goal_matrix[k,:] = np.array([int(centerline_area[k][0]),int(centerline_area[k][1])])
+        data["goal_list"] = goal_matrix
+        data["goal_num"] = len(centerline_area)
+
+        # finding the closest target
+        gt_goal_positions_pixels = transform_point((data["target_positions"][-1,:2]), data["raster_from_agent"])
+        # needs to slice the goal list to avoid using the zero-padded entry
+        xy = (data["goal_list"][:len(centerline_area)]-gt_goal_positions_pixels)
+        data["goal_gt"] = np.argmin(np.linalg.norm(xy, axis=-1))
+
+        return data
+
+    def get_additional_info_grid_goal(self,data):
+        raster_from_world = data["raster_from_world"]
+        world_from_raster = np.linalg.inv(raster_from_world)
+
+        target_positions_pixels = transform_points(data["target_positions"], data["raster_from_agent"])
+        original_pixel = target_positions_pixels[0]
+
+        centerline_area = []
+        centerline_area.append((original_pixel[0],original_pixel[1]))
+        for i in range(5,60,5):
+            for j in range(-20,20,5):
+                centerline_area.append((original_pixel[0]+i,original_pixel[1]+j))
+        
+        GOAL_NUM = len(centerline_area)
+        assert GOAL_NUM == 89
+        goal_matrix = np.zeros((GOAL_NUM,2),dtype=int)
+        for k in range(len(centerline_area)):
+            goal_matrix[k,:] = np.array([int(centerline_area[k][0]),int(centerline_area[k][1])])
+        data["goal_list"] = goal_matrix
+        data["goal_num"] = GOAL_NUM
+
+        # finding the closest target
+        gt_goal_positions_pixels = transform_point((data["target_positions"][-1,:2]), data["raster_from_agent"])
+        # needs to slice the goal list to avoid using the zero-padded entry
+        xy = (data["goal_list"]-gt_goal_positions_pixels)
+
+        if len(xy) != 0:
+            data["goal_gt"] = np.argmin(np.linalg.norm(xy, axis=-1))
+        else:
+            data["goal_gt"] = None
+#            print("None goal gt!")
+
+        return data
+
 
     def get_scene_dataset(self, scene_index: int) -> "BaseEgoDataset":
         """

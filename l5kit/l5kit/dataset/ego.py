@@ -83,8 +83,8 @@ class BaseEgoDataset(Dataset):
         data["negative_positions"] = data["target_positions"].copy()
 
         import random
-        shooting_delta = random.randint(-6, 6)/10.0
-        delta = 0.05 if shooting_delta > 0 else -0.05
+        shooting_delta = random.randint(-2, 2)/10.0
+        delta = 0.04 if shooting_delta > 0 else -0.04
         for i in range(len(data["negative_positions"])):
             delta = delta + shooting_delta
             data["negative_positions"][i][1] -= delta
@@ -249,11 +249,13 @@ class EgoDataset(BaseEgoDataset):
             state_index = index - self.cumulative_sizes[scene_index - 1]
         data = self.get_frame(scene_index, state_index)
 
-        # getting our customized data in 'get_additional
-        data = self.get_additional_info(data)
+        # getting our customized data in get_additional
+        data = self.get_additional_info_grid_goal(data)
+        #data = self.get_additional_info_centerline_goal(data)
         return data
 
-    def get_additional_info(self,data):
+    # centerline_goal version
+    def get_additional_info_centerline_goal(self,data):
         raster_from_world = data["raster_from_world"]
         world_from_raster = np.linalg.inv(raster_from_world)
 
@@ -283,8 +285,10 @@ class EgoDataset(BaseEgoDataset):
             lane_idx = rast.sem_rast.mapAPI.bounds_info["lanes"]["ids"][lane_idx]
             lane_dict = rast.sem_rast.mapAPI.get_lane_coords(lane_idx)
     
-            xyz_left = lane_dict["xyz_left"]
-            xyz_right = lane_dict["xyz_right"]
+            step = max((lane_dict["xyz_left"]).shape[0],(lane_dict["xyz_right"]).shape[0])
+
+            xyz_left = rast.sem_rast.mapAPI.interpolate(lane_dict["xyz_left"], step,InterpolationMethod.INTER_ENSURE_LEN)
+            xyz_right = rast.sem_rast.mapAPI.interpolate(lane_dict["xyz_left"], step,InterpolationMethod.INTER_ENSURE_LEN)
             xyz_center = (xyz_left+xyz_right)/2
         
             mid_steps = 5
@@ -313,10 +317,51 @@ class EgoDataset(BaseEgoDataset):
         gt_goal_positions_pixels = transform_point((data["target_positions"][-1,:2]), data["raster_from_agent"])
         # needs to slice the goal list to avoid using the zero-padded entry
         xy = (data["goal_list"][:len(centerline_area)]-gt_goal_positions_pixels)
-        data["goal_gt"] = np.argmin(np.linalg.norm(xy, axis=-1))
+        
+        if len(xy) != 0:
+            data["goal_gt"] = np.argmin(np.linalg.norm(xy, axis=-1))
+        else:
+            data["goal_gt"] = None
+
+        return data
+   
+    # sampling the goal candidate with uniform points in the grid!
+    def get_additional_info_grid_goal(self,data):
+        raster_from_world = data["raster_from_world"]
+        world_from_raster = np.linalg.inv(raster_from_world)
+
+        target_positions_pixels = transform_points(data["target_positions"], data["raster_from_agent"])
+        original_pixel = target_positions_pixels[0]
+
+        centerline_area = []
+        centerline_area.append((original_pixel[0],original_pixel[1]))
+        for i in range(5,60,5):
+            for j in range(-20,20,5):
+                centerline_area.append((original_pixel[0]+i,original_pixel[1]+j))
+
+        GOAL_NUM = len(centerline_area)
+        assert GOAL_NUM == 89
+        goal_matrix = np.zeros((GOAL_NUM,2),dtype=int)
+        for k in range(len(centerline_area)):
+            goal_matrix[k,:] = np.array([int(centerline_area[k][0]),int(centerline_area[k][1])])
+        data["goal_list"] = goal_matrix
+        data["goal_num"] = GOAL_NUM
+
+        # finding the closest target
+        gt_goal_positions_pixels = transform_point((data["target_positions"][-1,:2]), data["raster_from_agent"])
+        # needs to slice the goal list to avoid using the zero-padded entry
+        xy = (data["goal_list"]-gt_goal_positions_pixels)
+        
+        if len(xy) != 0:
+            data["goal_gt"] = np.argmin(np.linalg.norm(xy, axis=-1))
+        else:
+            data["goal_gt"] = None
+#            print("None goal gt!")
 
         return data
             
+
+         
 
 class EgoDatasetVectorized(BaseEgoDataset):
     def __init__(
