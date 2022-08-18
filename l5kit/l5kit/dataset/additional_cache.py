@@ -8,5 +8,8 @@ class AdditionalCache:
 
         # data stored id -> filename
 
-        pass
+        self.mapping = {}
+        #self.mapping["history_positions"]
 
+    def get_mapping(key, idx):
+        pass

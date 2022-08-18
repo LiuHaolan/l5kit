@@ -23,7 +23,8 @@ import os
 os.environ["L5KIT_DATA_FOLDER"] = "/mnt/scratch/v_liuhaolan/l5kit_data"
 dm = LocalDataManager(None)
 # get config
-cfg = load_config_data("./data_v2.yaml")
+#cfg = load_config_data("./data_v2.yaml")
+cfg = load_config_data("./nmp-config.yaml")
 
 perturb_prob = cfg["train_data_loader"]["perturb_probability"]
 
@@ -40,11 +41,11 @@ perturbation = AckermanPerturbation(
 perturbation.perturb_prob = perturb_prob
 
 
-preprocessed_dir = "/mnt/scratch/v_liuhaolan/preprocessed_v2"
+preprocessed_dir = "/mnt/scratch/v_liuhaolan/preprocessed/"
 
 
 # ===== INIT DATASET
 from l5kit.dataset import CachedEgoDataset
 
 train_zarr = ChunkedDataset(dm.require(cfg["train_data_loader"]["key"])).open()
-train_dataset = CachedEgoDataset(cfg, train_zarr, rasterizer, preprocessed_path=preprocessed_dir,perturbation=perturbation)
+train_dataset = CachedEgoDataset(cfg, train_zarr, rasterizer, if_preprocess = True, preprocessed_path=preprocessed_dir,perturbation=perturbation)

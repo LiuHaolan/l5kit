@@ -80,6 +80,7 @@ class BaseEgoDataset(Dataset):
         # we can sample a negative trajectory and return the pixel index
         # haolan: adding a negative_position entry
         # 
+        """
         data["negative_positions"] = data["target_positions"].copy()
 
         import random
@@ -92,7 +93,8 @@ class BaseEgoDataset(Dataset):
         # also build image coordinate
         data['target_positions_pixels'] = np.round(transform_points(data["target_positions"], data["raster_from_agent"]),0).astype(int)
         data['negative_positions_pixels'] = np.round(transform_points(data["negative_positions"], data["raster_from_agent"]),0).astype(int)
-
+        """
+        data = self.get_additional_info_grid_goal(data)
         return data
 
     def __getitem__(self, index: int) -> dict:
@@ -251,7 +253,7 @@ class EgoDataset(BaseEgoDataset):
 
         # getting our customized data in get_additional
         data = self.get_additional_info_grid_goal(data)
-        #data = self.get_additional_info_centerline_goal(data)
+        # data = self.get_additional_info_centerline_goal(data)
         return data
 
     # centerline_goal version
@@ -324,10 +326,12 @@ class EgoDataset(BaseEgoDataset):
             data["goal_gt"] = None
 
         return data
-   
-    # sampling the goal candidate with uniform points in the grid!
+  
+    
     def get_additional_info_grid_goal(self,data):
         raster_from_world = data["raster_from_world"]
+        #assert raster_from_world != None
+
         world_from_raster = np.linalg.inv(raster_from_world)
 
         target_positions_pixels = transform_points(data["target_positions"], data["raster_from_agent"])
@@ -335,12 +339,12 @@ class EgoDataset(BaseEgoDataset):
 
         centerline_area = []
         centerline_area.append((original_pixel[0],original_pixel[1]))
-        for i in range(5,60,5):
-            for j in range(-20,20,5):
+        for i in range(0,40,2):
+            for j in range(-10,10,2):
                 centerline_area.append((original_pixel[0]+i,original_pixel[1]+j))
 
         GOAL_NUM = len(centerline_area)
-        assert GOAL_NUM == 89
+        assert GOAL_NUM == 201
         goal_matrix = np.zeros((GOAL_NUM,2),dtype=int)
         for k in range(len(centerline_area)):
             goal_matrix[k,:] = np.array([int(centerline_area[k][0]),int(centerline_area[k][1])])
@@ -351,7 +355,7 @@ class EgoDataset(BaseEgoDataset):
         gt_goal_positions_pixels = transform_point((data["target_positions"][-1,:2]), data["raster_from_agent"])
         # needs to slice the goal list to avoid using the zero-padded entry
         xy = (data["goal_list"]-gt_goal_positions_pixels)
-        
+
         if len(xy) != 0:
             data["goal_gt"] = np.argmin(np.linalg.norm(xy, axis=-1))
         else:
@@ -359,7 +363,9 @@ class EgoDataset(BaseEgoDataset):
 #            print("None goal gt!")
 
         return data
-            
+
+
+           
 
          
 

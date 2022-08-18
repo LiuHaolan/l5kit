@@ -118,11 +118,10 @@ class L2DisplacementYawReward(Reward):
         return reward_dict
 
 
-
+from l5kit.configs.custom_conf import COLLISION_REWARD
 class ExplorationReward(Reward):
-    """This class is responsible for calculating a reward based on
-    (1) L2 displacement error on the (x, y) coordinates
-    (2) Closest angle error on the yaw coordinate
+    """This class is responsible for calculating a reward for
+    our customized goal-based planner
     during close loop simulation within the gym-compatible L5Kit environment.
 
     :param reward_prefix: the prefix that will identify this reward class
@@ -188,6 +187,6 @@ class ExplorationReward(Reward):
 
         # clip the distance error (in x, y) only, not the yaw error (yaw error is bounded).
         # Total reward
-        total_reward = error1 + error2 + error3
+        total_reward = (error1 + error2 + error3)*COLLISION_REWARD
         reward_dict = {"total": total_reward, "distance": None, "yaw": None}
         return reward_dict

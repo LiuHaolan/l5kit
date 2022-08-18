@@ -45,7 +45,8 @@ class CachedBaseEgoDataset(Dataset):
             cfg: dict,
             zarr_dataset: ChunkedDataset,
             preprocessed_path: str,
-            k: int = 20
+            if_preprocess: bool = False,
+            k: int = 20,
     ):
         """
         Get a PyTorch dataset object that can be used to train DNN
@@ -68,12 +69,35 @@ class CachedBaseEgoDataset(Dataset):
         self.cached_item_list = [None]*self.__len__()
         self.filename_list = [None]*self.__len__()
         self.cached_dir = preprocessed_path
-        assert self.cached_dir is not None
+        
 #        self.cached_dir = "/home/haolan/Downloads/prediction_dataset/preprocessed"
 
-#        self.additional_dir="/mnt/scratch/v_liuhaolan/additional"
+        self.additional_dir="/mnt/scratch/v_liuhaolan/additional_goal"
 
-        print(len(self))
+        if self.cfg["debug"]==True:
+        # if there is a pre-processed directory, read it into the memory.
+        
+            print("Debug: Read preprocessed dataset into memory...")
+            for name in tqdm(range(1024)):
+                idx = name
+                name = str(name)
+
+                self.filename_list[idx] = os.path.join(self.cached_dir, name)
+                
+                filename = self.filename_list[idx]
+                file_handle = open(filename, "rb" )
+                res = pickle.load(file_handle)
+
+                file_handle.close()
+
+                self.cached_item_list[idx] = res
+            return
+    
+
+
+
+        # print(len(self))
+#        print(self.cached_dir)
         dirlen = len(os.listdir(self.cached_dir))
         print("directory length: {}".format(dirlen))
         # if there is a pre-processed directory, read it into the memory.
@@ -87,29 +111,30 @@ class CachedBaseEgoDataset(Dataset):
                 filename = self.filename_list[idx]
                 file_handle = open(filename, "rb" )
                 res = pickle.load(file_handle)
-                file_handle.close()
                 
                 # read pre-processed and processed the additional info
-                
-       #         add_name = os.path.join(self.additional_dir, name)
-       #         add_handle = open(add_name, "wb")
-       #         decompressed_res = pickle.loads(zlib.decompress(res))
-       #         decompressed_res = self.get_additional_info_grid_goal(decompressed_res)
-       #         res = zlib.compress(pickle.dumps(decompressed_res))
-       #         pickle.dump(res, add_handle)  
-       #         add_handle.close()
+                if if_preprocess:
+                    add_name = os.path.join(self.additional_dir, name)
+                    add_handle = open(add_name, "wb")
+                    decompressed_res = pickle.loads(zlib.decompress(res))
+                    decompressed_res = self.get_additional_info_grid_goal(decompressed_res)
+                    res = zlib.compress(pickle.dumps(decompressed_res))
+                    pickle.dump(res, add_handle)  
+                    add_handle.close()
 
-       #         file_handle.close()
+                file_handle.close()
 
                 self.cached_item_list[idx] = res
             return
     
+        print("preprocess from original dataset!")
         print("not reading the dataset?")
-        return
+        # return
 
         # the sampled 
         # skip that part
         for scene_index in tqdm(range(len(self.dataset.scenes))):
+        # for scene_index in tqdm(range(int(len(self.dataset.scenes)*9/10), len(self.dataset.scenes))):
             if scene_index == 0:
                 frame_num = self.cumulative_sizes[0]
             else:
@@ -127,7 +152,8 @@ class CachedBaseEgoDataset(Dataset):
 #                processes.append(pool.apply_async(rasterize_proc, args=(self, scene_index, state_index)))
 #            _ = [p.get() for p in processes]
                 res = self.get_frame(scene_index, state_index)
-                
+                res = self.get_additional_info_grid_goal(res)
+
                 index = scene_index*self.k + frame_index
                 filename = os.path.join(self.cached_dir, str(index))
                 self.filename_list[index] = filename
@@ -154,6 +180,9 @@ class CachedBaseEgoDataset(Dataset):
             int: the number of elements in the dataset
         """
 #        return len(self.dataset.frames)
+        if self.cfg["debug"] == True:
+            return 1024
+
         return len(self.dataset.scenes)*self.k
 
     def get_frame(self, scene_index: int, state_index: int, track_id: Optional[int] = None) -> dict:
@@ -192,6 +221,7 @@ class CachedBaseEgoDataset(Dataset):
         # we can sample a negative trajectory and return the pixel index
         # haolan: adding a negative_position entry
         # 
+        """
         data["negative_positions"] = data["target_positions"].copy()
 
         import random
@@ -204,7 +234,8 @@ class CachedBaseEgoDataset(Dataset):
         # also build image coordinate
         data['target_positions_pixels'] = np.round(transform_points(data["target_positions"], data["raster_from_agent"]),0).astype(int)
         data['negative_positions_pixels'] = np.round(transform_points(data["negative_positions"], data["raster_from_agent"]),0).astype(int)
-
+        """
+        
         return data
 
     def __getitem__(self, index: int) -> dict:
@@ -335,6 +366,8 @@ class CachedBaseEgoDataset(Dataset):
 
     def get_additional_info_grid_goal(self,data):
         raster_from_world = data["raster_from_world"]
+        assert raster_from_world != None
+
         world_from_raster = np.linalg.inv(raster_from_world)
 
         target_positions_pixels = transform_points(data["target_positions"], data["raster_from_agent"])
@@ -342,12 +375,12 @@ class CachedBaseEgoDataset(Dataset):
 
         centerline_area = []
         centerline_area.append((original_pixel[0],original_pixel[1]))
-        for i in range(5,60,5):
-            for j in range(-20,20,5):
+        for i in range(0,40,2):
+            for j in range(-10,10,2):
                 centerline_area.append((original_pixel[0]+i,original_pixel[1]+j))
         
         GOAL_NUM = len(centerline_area)
-        assert GOAL_NUM == 89
+        assert GOAL_NUM == 201
         goal_matrix = np.zeros((GOAL_NUM,2),dtype=int)
         for k in range(len(centerline_area)):
             goal_matrix[k,:] = np.array([int(centerline_area[k][0]),int(centerline_area[k][1])])
@@ -421,6 +454,7 @@ class CachedEgoDataset(CachedBaseEgoDataset):
             zarr_dataset: ChunkedDataset,
             rasterizer: Rasterizer,
             perturbation: Optional[Perturbation] = None,
+            if_preprocess: bool = False,
             preprocessed_path: str = None,
             k = 20
     ):
@@ -436,7 +470,7 @@ class CachedEgoDataset(CachedBaseEgoDataset):
         """
         self.perturbation = perturbation
         self.rasterizer = rasterizer
-        super().__init__(cfg, zarr_dataset, preprocessed_path, k)
+        super().__init__(cfg, zarr_dataset, if_preprocess=if_preprocess, preprocessed_path=preprocessed_path, k=k)
 
     def _get_sample_function(self) -> Callable[..., dict]:
         render_context = RenderContext(
@@ -479,13 +513,16 @@ class CachedEgoDataset(CachedBaseEgoDataset):
         return EgoDataset(self.cfg, dataset, self.rasterizer, self.perturbation)
 
 
-class EgoDatasetVectorized(CachedBaseEgoDataset):
+class CachedEgoDatasetVectorized(CachedBaseEgoDataset):
     def __init__(
         self,
         cfg: dict,
         zarr_dataset: ChunkedDataset,
         vectorizer: Vectorizer,
         perturbation: Optional[Perturbation] = None,
+        if_preprocess: bool = False,
+        preprocessed_path: str = None,
+        k : Optional[int] = 20,
     ):
         """
         Get a PyTorch dataset object that can be used to train DNNs with vectorized input
@@ -499,7 +536,7 @@ class EgoDatasetVectorized(CachedBaseEgoDataset):
         """
         self.perturbation = perturbation
         self.vectorizer = vectorizer
-        super().__init__(cfg, zarr_dataset)
+        super().__init__(cfg, zarr_dataset,  if_preprocess=if_preprocess, preprocessed_path=preprocessed_path, k=k)
 
     def _get_sample_function(self) -> Callable[..., dict]:
         return partial(
@@ -516,3 +553,10 @@ class EgoDatasetVectorized(CachedBaseEgoDataset):
     def get_scene_dataset(self, scene_index: int) -> "EgoDatasetVectorized":
         dataset = self.dataset.get_scene_dataset(scene_index)
         return EgoDatasetVectorized(self.cfg, dataset, self.vectorizer, self.perturbation)
+
+    def get_additional_info_grid_goal(self,data):
+        
+        return data
+
+
+

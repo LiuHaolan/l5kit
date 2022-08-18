@@ -23,20 +23,20 @@ import os
 os.environ["L5KIT_DATA_FOLDER"] = "/mnt/scratch/v_liuhaolan/l5kit_data"
 dm = LocalDataManager(None)
 # get config
-cfg = load_config_data("./nmp-config-sample.yaml")
+cfg = load_config_data("./nmp-config.yaml")
 
 # rasterisation and perturbation
 rasterizer = build_rasterizer(cfg, dm)
 
-preprocessed_dir = "/mnt/scratch/v_liuhaolan/additional"
+preprocessed_dir = "/mnt/scratch/v_liuhaolan/preprocessed_v3"
 
 from l5kit.dataset import CachedEgoDataset
 
 train_zarr = ChunkedDataset(dm.require(cfg["train_data_loader"]["key"])).open()
 train_dataset = CachedEgoDataset(cfg, train_zarr, rasterizer, preprocessed_path=preprocessed_dir)
 
-from model.models import RasterizedTNT
-model = RasterizedTNT(
+from model.models import RasterizedTNTWithHistory
+model = RasterizedTNTWithHistory(
         model_arch="resnet50",
         num_input_channels=rasterizer.num_channels(),
         num_targets=3 * cfg["model_params"]["future_num_frames"],  # X, Y, Yaw * number of future states,
@@ -52,6 +52,8 @@ train_dataloader = DataLoader(train_dataset, shuffle=train_cfg["shuffle"], batch
                              num_workers=train_cfg["num_workers"])
 #device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 device = "cuda:0"
+#device = "cpu"
+
 model = model.to(device)
 #optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
@@ -129,6 +131,6 @@ for epochs in range(epoch_num):
     loss_average = loss_val/cnt
     print("val loss: {}, motion_loss: {}, target_loss: {}".format(loss_average, loss1/cnt, loss2/cnt))
     
-    torch.save(model.state_dict(),"./planning_tnt_{}.pt".format(epochs))
+    torch.save(model.state_dict(),"./ckpt/nooffset/planning_tnt_{}.pt".format(epochs))
 
 
