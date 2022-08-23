@@ -282,6 +282,22 @@ class VectorizedUnrollModel(VectorizedModel):
 
             eval_dict = {"positions": pred_positions, "yaws": pred_yaws}
             eval_dict["attention_weights"] = attns
+            
+            # [batch_size, future_num_frames, 3]
+            target_weights = data_batch["target_availabilities"][:, :future_num_frames]
+            # only calculate loss for the correct frames, i.e. not during the warmup phase,
+            target_weights[:, :self.warmup_num_frames] = 0
+            target_weights = target_weights.unsqueeze(-1) * self.weights_scaling
+
+            # discount timesteps t via discount_factor**t
+            # [future_num_frames]
+            discount_weights = torch.tensor([self.discount_factor**(t - self.warmup_num_frames) for t in range(
+                target_weights.shape[1])])
+            target_weights *= discount_weights[None, ..., None].to(target_weights.device)
+            loss = torch.mean(self.criterion(outputs_ts, targets) * target_weights)
+            
+            eval_dict["loss"] = loss
+            
             return eval_dict
 
     def update_transformation_matrices(self, pred_xy_step_unnorm: torch.Tensor, pred_yaw_step: torch.Tensor,

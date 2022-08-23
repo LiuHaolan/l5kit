@@ -256,7 +256,7 @@ class CachedBaseEgoDataset(Dataset):
             
             # the only place to call get_additional_info, needs to add to the rest place!
             # TODO
-            # data = self.get_additional_info(data)
+            data = self.get_additional_info_grid_goal(data)
             return data
         else:
             # read from the predefined files
@@ -366,7 +366,7 @@ class CachedBaseEgoDataset(Dataset):
 
     def get_additional_info_grid_goal(self,data):
         raster_from_world = data["raster_from_world"]
-        assert raster_from_world != None
+        # assert raster_from_world != None
 
         world_from_raster = np.linalg.inv(raster_from_world)
 
@@ -375,12 +375,16 @@ class CachedBaseEgoDataset(Dataset):
 
         centerline_area = []
         centerline_area.append((original_pixel[0],original_pixel[1]))
-        for i in range(0,40,2):
-            for j in range(-10,10,2):
-                centerline_area.append((original_pixel[0]+i,original_pixel[1]+j))
+        #for i in range(0,40,2):
+        #    for j in range(-10,10,2):
+        #        centerline_area.append((original_pixel[0]+i,original_pixel[1]+j))
         
+        for i in range(10,31,10):
+            for j in range(-10,11,10):
+                centerline_area.append((original_pixel[0]+i,original_pixel[1]+j))
+ 
         GOAL_NUM = len(centerline_area)
-        assert GOAL_NUM == 201
+        assert GOAL_NUM == 10
         goal_matrix = np.zeros((GOAL_NUM,2),dtype=int)
         for k in range(len(centerline_area)):
             goal_matrix[k,:] = np.array([int(centerline_area[k][0]),int(centerline_area[k][1])])
@@ -456,7 +460,8 @@ class CachedEgoDataset(CachedBaseEgoDataset):
             perturbation: Optional[Perturbation] = None,
             if_preprocess: bool = False,
             preprocessed_path: str = None,
-            k = 20
+            k = 20,
+            augmented: Optional[bool] = False,
     ):
         """
         Get a PyTorch dataset object that can be used to train DNN
@@ -470,6 +475,7 @@ class CachedEgoDataset(CachedBaseEgoDataset):
         """
         self.perturbation = perturbation
         self.rasterizer = rasterizer
+        self.augmented = augmented
         super().__init__(cfg, zarr_dataset, if_preprocess=if_preprocess, preprocessed_path=preprocessed_path, k=k)
 
     def _get_sample_function(self) -> Callable[..., dict]:
@@ -489,6 +495,7 @@ class CachedEgoDataset(CachedBaseEgoDataset):
             filter_agents_threshold=self.cfg["raster_params"]["filter_agents_threshold"],
             rasterizer=self.rasterizer,
             perturbation=self.perturbation,
+            augmented = self.augmented,
         )
 
     def get_frame(self, scene_index: int, state_index: int, track_id: Optional[int] = None) -> dict:

@@ -62,7 +62,7 @@ class RasterizedMultiModalPlanningModel(RasterizedPlanningModel):
         # [batch_size, num_modes]
         outputs_nll = outputs_all[:, -self.num_modes:]
 
-        if self.training:
+        if True:
             if self.criterion is None:
                 raise NotImplementedError("Loss function is undefined.")
 
@@ -95,8 +95,10 @@ class RasterizedMultiModalPlanningModel(RasterizedPlanningModel):
             # [1]
             loss_nll = F.cross_entropy(outputs_nll, assignment)
             return {"loss": loss_dist + self.coef_alpha * loss_nll}
-        else:
-            outputs = outputs.view(batch_size, self.num_modes, self.num_timestamps, self.num_outputs)
+        
+        if not self.training:
+
+            # outputs = outputs.view(batch_size, self.num_modes, self.num_timestamps, self.num_outputs)
             outputs_selected = outputs[torch.arange(batch_size, device=outputs.device), outputs_nll.argmax(-1)]
             pred_positions, pred_yaws = outputs_selected[..., :2], outputs_selected[..., 2:3]
             pred_pos_all = outputs[..., :2]
@@ -106,4 +108,5 @@ class RasterizedMultiModalPlanningModel(RasterizedPlanningModel):
                 "yaws": pred_yaws,
                 "positions_all": pred_pos_all,
                 "yaws_all": pred_yaw_all,
+                "loss": loss_dist + self.coef_alpha * loss_nll
             }

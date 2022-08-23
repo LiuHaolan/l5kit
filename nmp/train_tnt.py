@@ -23,12 +23,12 @@ import os
 os.environ["L5KIT_DATA_FOLDER"] = "/mnt/scratch/v_liuhaolan/l5kit_data"
 dm = LocalDataManager(None)
 # get config
-cfg = load_config_data("./nmp-config.yaml")
+cfg = load_config_data("./goal-config.yaml")
 
 # rasterisation and perturbation
 rasterizer = build_rasterizer(cfg, dm)
 
-preprocessed_dir = "/mnt/scratch/v_liuhaolan/preprocessed_v3"
+preprocessed_dir = "/mnt/scratch/v_liuhaolan/preprocessed_goal"
 
 from l5kit.dataset import CachedEgoDataset
 
@@ -43,7 +43,7 @@ model = RasterizedTNTWithHistory(
         weights_scaling= [1., 1., 1.],
 #        criterion=nn.L1Loss(reduction="none")
          criterion=torch.nn.HuberLoss(reduction="none"),
-        num_mlp_hidden = 128
+        num_mlp_hidden = 64
         )
 
 train_cfg = cfg["train_data_loader"]
@@ -102,9 +102,15 @@ for epochs in range(epoch_num):
         motion_loss = np.round(motion_loss.item(),3)
         target_loss = result["target_loss"]
         target_loss = np.round(target_loss.item(),3)
+ 
+        cl_loss = result["classification"]
+        cl_loss = np.round(cl_loss.item(),3)
+        rg_loss = result["regression"]
+        rg_loss = np.round(rg_loss.item(),3)
+
         loss_avg = loss_avg + loss.item()
 #        iter_bar.set_description(f"loss: {(loss_v)} loss(avg): {loss_average}")
-        iter_bar.set_description(f"loss: {(loss_v)} motion_loss: {motion_loss} target_loss: {target_loss}")
+        iter_bar.set_description(f"loss: {(loss_v)} motion_loss: {motion_loss} target_loss: {target_loss} classification: {cl_loss} regression loss: {rg_loss}")
     #loss_avg = loss_avg / step
     #print("loss: {}".format(loss_avg))
 
@@ -115,7 +121,7 @@ for epochs in range(epoch_num):
     loss1 = 0
     loss2 = 0
 
-    cnt = 100
+    cnt = 1000
     for step,batch in enumerate(val_dataloader):
         # inference pass
         batch = {k: v.to(device) for k, v in batch.items()}
@@ -131,6 +137,6 @@ for epochs in range(epoch_num):
     loss_average = loss_val/cnt
     print("val loss: {}, motion_loss: {}, target_loss: {}".format(loss_average, loss1/cnt, loss2/cnt))
     
-    torch.save(model.state_dict(),"./ckpt/nooffset/planning_tnt_{}.pt".format(epochs))
+    torch.save(model.state_dict(),"./ckpt/nooffset/planning_tnt_{}_10cl_5xloss.pt".format(epochs))
 
 

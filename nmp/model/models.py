@@ -368,10 +368,10 @@ class RasterizedTNTWithHistory(nn.Module):
 
         # driving waypoint final output
 #        self.fc = nn.Linear(in_features=2048, out_features=num_targets)
-        # goal number 201
-        self.target_mlp = MLP(in_channels=(2048), out_channels=201, hidden_unit=num_mlp_hidden)
-        # self.offset_x_mlp = MLP(in_channels=(2048+2), out_channels=1, hidden_unit=num_mlp_hidden)
-        # self.offset_y_mlp = MLP(in_channels=(2048+2), out_channels=1, hidden_unit=num_mlp_hidden)
+        # goal number 
+        self.target_mlp = MLP(in_channels=(2048), out_channels=10, hidden_unit=num_mlp_hidden)
+        self.offset_x_mlp = MLP(in_channels=(2048+2), out_channels=1, hidden_unit=num_mlp_hidden)
+        self.offset_y_mlp = MLP(in_channels=(2048+2), out_channels=1, hidden_unit=num_mlp_hidden)
 
         self.motion_network = MLP(in_channels=(2048+2), out_channels=num_targets, hidden_unit=num_mlp_hidden)
         self.target_mlp_softmax = nn.LogSoftmax(dim=1)
@@ -393,20 +393,30 @@ class RasterizedTNTWithHistory(nn.Module):
         #feature_repeat_batch = embedding.unsqueeze(1).repeat(1,goal_num,1)
         #input_batch = torch.cat([feature_repeat_batch,goal_batch],dim=2)
 
+        #print(goal_num)
+        #print(data_batch["goal_gt"])
+
         # x: batch_size X goal_score
         x = self.target_mlp(embedding)
         target_prediction = self.target_mlp_softmax(x)
-        #target_index = torch.argmax(x, dim=1)
+        target_index = torch.argmax(target_prediction, dim=1)
  #       target_selection = torch.index_select(goal_batch, dim=1, index=target_index)
-        #target_selection = goal_batch[torch.arange(goal_batch.size(0)), target_index]
- 
+        target_selection = goal_batch[torch.arange(goal_batch.size(0)), target_index]
+
+        input_batch = torch.cat([embedding, target_selection], dim=1)
+
         # print(target_selection.shape) batch_size X 2
         # target_selection = target_selection.unsqueeze(1).repeat(1,goal_num,1)
         # print(target_selection.shape)
 
-        #x_offset = self.offset_x_mlp(input_batch)
-        #y_offset = self.offset_y_mlp(input_batch)
-        #xy_offset = torch.cat([x_offset, y_offset], dim=2)
+        x_offset = self.offset_x_mlp(input_batch)
+        y_offset = self.offset_y_mlp(input_batch)
+        xy_offset = torch.cat([x_offset, y_offset], dim=1)
+        
+        # clamp the xy offset
+        BOUND = 5 
+        xy_offset = torch.clamp(xy_offset, min=-BOUND, max=BOUND)
+
         #xy_offset = xy_offset[torch.arange(batch_size), data_batch["goal_gt"]]       
         # print(xy_offset.shape)
 
@@ -448,15 +458,16 @@ class RasterizedTNTWithHistory(nn.Module):
             # gt_goals
             # aux_loss = torch.mean(self.criterion(torch.sum(target_selection,dim=1).float(), torch.sum(batch_gt,dim=1).float())) 
              
-            aux_loss = torch.mean(nn.NLLLoss(reduction="none")(target_prediction, data_batch["goal_gt"]))
-            
-
+            aux_loss1 =  torch.mean(self.criterion(torch.sum(target_selection+xy_offset,dim=1).float(), torch.sum(batch_gt,dim=1).float())) 
+            aux_loss2 = (nn.NLLLoss(reduction="mean")(target_prediction, data_batch["goal_gt"]))
+        
+            aux_loss = aux_loss1 + aux_loss2
             #aux_loss = aux_loss/batch_size
 
             alpha = 1.0
             loss = motion_loss + alpha*aux_loss
 
-            train_dict = {"loss": loss, "motion_loss": motion_loss, "target_loss": aux_loss}
+            train_dict = {"loss": loss, "motion_loss": motion_loss, "target_loss": aux_loss, "classification": aux_loss1, "regression": aux_loss2}
 #            return train_dict
         if not self.training:
 
@@ -475,4 +486,8 @@ class RasterizedTNTWithHistory(nn.Module):
             train_dict["yaws"] = pred_yaws
             train_dict["target_softmax"] = target_selection
         return train_dict
+
+
+
+
 

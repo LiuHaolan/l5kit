@@ -193,7 +193,7 @@ class BoxRasterizer(Rasterizer):
             history_agents: List[np.ndarray],
             history_tl_faces: List[np.ndarray],
             agent: Optional[np.ndarray] = None,
-            random_shift = None
+            random_shift = None,
     ) -> np.ndarray:
         """Generate raster image by rendering Ego & Agents as bounding boxes on the raster image.
         Ego & Agents from different past frame are rendered at different image channel.
