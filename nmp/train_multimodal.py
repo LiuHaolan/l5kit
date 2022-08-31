@@ -28,7 +28,8 @@ cfg = load_config_data("./goal-config.yaml")
 # rasterisation and perturbation
 rasterizer = build_rasterizer(cfg, dm)
 
-preprocessed_dir = "/mnt/scratch/v_liuhaolan/preprocessed_goal"
+#preprocessed_dir = "/mnt/scratch/v_liuhaolan/preprocessed_goal"
+preprocessed_dir = "/mnt/scratch/v_liuhaolan/augmented"
 
 from l5kit.dataset import CachedEgoDataset
 
@@ -112,7 +113,7 @@ for epochs in range(epoch_num):
     loss1 = 0
     loss2 = 0
 
-    cnt = 100
+    cnt = 1000
     for step,batch in enumerate(val_dataloader):
         # inference pass
         batch = {k: v.to(device) for k, v in batch.items()}
@@ -128,6 +129,6 @@ for epochs in range(epoch_num):
     loss_average = loss_val/cnt
     print("val loss: {}".format(loss_average))
     
-    torch.save(model.state_dict(),"./ckpt/multimodal/planning_mm_{}.pt".format(epochs))
+    torch.save(model.state_dict(),"./ckpt/multimodal/planning_mm_{}_augmented.pt".format(epochs))
 
 

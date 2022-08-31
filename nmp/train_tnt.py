@@ -137,6 +137,6 @@ for epochs in range(epoch_num):
     loss_average = loss_val/cnt
     print("val loss: {}, motion_loss: {}, target_loss: {}".format(loss_average, loss1/cnt, loss2/cnt))
     
-    torch.save(model.state_dict(),"./ckpt/nooffset/planning_tnt_{}_10cl_5xloss.pt".format(epochs))
+    torch.save(model.state_dict(),"./ckpt/nooffset/planning_tnt_{}_new.pt".format(epochs))
 
 

@@ -41,7 +41,7 @@ perturbation = AckermanPerturbation(
 perturbation.perturb_prob = perturb_prob
 
 
-preprocessed_dir = "/mnt/scratch/v_liuhaolan/augmented/"
+preprocessed_dir = "/mnt/scratch/v_liuhaolan/augmented_v2/"
 
 
 # ===== INIT DATASET

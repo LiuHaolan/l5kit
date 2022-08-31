@@ -272,11 +272,11 @@ def generate_agent_sample(
         "frame_index": state_index,
         "image": input_im,
         "target_positions": future_positions_m,
-        "target_yaws": future_yaws_rad,
+        "target_yaws": -future_yaws_rad,
         "target_velocities": future_vels_mps,
         "target_availabilities": future_availabilities,
         "history_positions": history_positions_m,
-        "history_yaws": history_yaws_rad,
+        "history_yaws": -history_yaws_rad,
         "history_velocities": history_vels_mps,
         "history_availabilities": history_availabilities,
         "world_to_image": raster_from_world,  # TODO deprecate
@@ -289,6 +289,7 @@ def generate_agent_sample(
         "extent": agent_extent_m,
         "history_extents": history_extents,
         "future_extents": future_extents,
+        "random_shift": shift,
     }
     if len(history_vels_mps) > 0:
         # estimated current speed based on displacement between current frame at T and past frame at T-1

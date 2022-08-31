@@ -2,12 +2,12 @@
 format_version: 4
 
 # debug option
-debug: False
+debug: True
 
 ###################
 ## Model options
 model_params:
-  model_architecture: "resnet50"
+  model_architecture: "unet"
 
   history_num_frames: 4
   future_num_frames: 12
@@ -61,7 +61,7 @@ train_data_loader:
 
 val_data_loader:
   key: "scenes/validate.zarr"
-  batch_size: 48
+  batch_size: 64
   shuffle: False
   num_workers: 2
 

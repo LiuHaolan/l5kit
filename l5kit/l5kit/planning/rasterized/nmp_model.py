@@ -60,7 +60,7 @@ class NMPPlanningModel(nn.Module):
                 padding=(3, 3),
                 bias=False,
             )
-
+z
 
     def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         # [batch_size, channels, height, width]

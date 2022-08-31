@@ -22,6 +22,14 @@ from tqdm import tqdm
 import zlib
 import pickle
 
+from l5kit.data.map_api import InterpolationMethod, MapAPI, TLFacesColors
+
+from collections import defaultdict
+from enum import IntEnum
+from typing import Dict, List, Optional
+from math import sqrt
+
+
 def rasterize_proc(self, scene_index, state_index):
     res = self.get_frame(scene_index, state_index)
                 
@@ -38,6 +46,14 @@ def rasterize_proc(self, scene_index, state_index):
     pickle.dump(res, file_handle)
     file_handle.close()
 
+import math
+def gaussian(xL, yL, H, W, sigma=5):
+
+    channel = [math.exp(-((c - xL) ** 2 + (r - yL) ** 2) / (2 * sigma ** 2)) for r in range(H) for c in range(W)]
+    channel = np.array(channel, dtype=np.float32)
+    channel = np.reshape(channel, newshape=(H, W))
+
+    return channel
 
 class CachedBaseEgoDataset(Dataset):
     def __init__(
@@ -47,6 +63,7 @@ class CachedBaseEgoDataset(Dataset):
             preprocessed_path: str,
             if_preprocess: bool = False,
             k: int = 20,
+            centerline: bool = False,
     ):
         """
         Get a PyTorch dataset object that can be used to train DNN
@@ -58,7 +75,8 @@ class CachedBaseEgoDataset(Dataset):
         self.cfg = cfg
         self.dataset = zarr_dataset
         self.cumulative_sizes = self.dataset.scenes["frame_index_interval"][:, 1]
-
+        self.centerline = centerline
+        
         # build a partial so we don't have to access cfg each time
         self.sample_function = self._get_sample_function()
        
@@ -72,7 +90,7 @@ class CachedBaseEgoDataset(Dataset):
         
 #        self.cached_dir = "/home/haolan/Downloads/prediction_dataset/preprocessed"
 
-        self.additional_dir="/mnt/scratch/v_liuhaolan/additional_goal"
+        self.additional_dir="/mnt/scratch/v_liuhaolan/preprocessed_centerline/"
 
         if self.cfg["debug"]==True:
         # if there is a pre-processed directory, read it into the memory.
@@ -103,6 +121,9 @@ class CachedBaseEgoDataset(Dataset):
         # if there is a pre-processed directory, read it into the memory.
         if len(self) == dirlen:
             print("Read preprocessed dataset into memory...")
+            if if_preprocess:
+                print("Build additional goal sets.")
+            
             for name in tqdm(os.listdir(self.cached_dir)):
                 idx = int(name)
 
@@ -117,7 +138,7 @@ class CachedBaseEgoDataset(Dataset):
                     add_name = os.path.join(self.additional_dir, name)
                     add_handle = open(add_name, "wb")
                     decompressed_res = pickle.loads(zlib.decompress(res))
-                    decompressed_res = self.get_additional_info_grid_goal(decompressed_res)
+                    decompressed_res = self.get_additional_info_centerline_goal(decompressed_res)
                     res = zlib.compress(pickle.dumps(decompressed_res))
                     pickle.dump(res, add_handle)  
                     add_handle.close()
@@ -128,9 +149,9 @@ class CachedBaseEgoDataset(Dataset):
             return
     
         print("preprocess from original dataset!")
-        print("not reading the dataset?")
-        # return
-
+        print("not reading the dataset?") 
+        return
+        
         # the sampled 
         # skip that part
         for scene_index in tqdm(range(len(self.dataset.scenes))):
@@ -152,7 +173,7 @@ class CachedBaseEgoDataset(Dataset):
 #                processes.append(pool.apply_async(rasterize_proc, args=(self, scene_index, state_index)))
 #            _ = [p.get() for p in processes]
                 res = self.get_frame(scene_index, state_index)
-                res = self.get_additional_info_grid_goal(res)
+                res = self.get_additional_info_centerline_goal(res)
 
                 index = scene_index*self.k + frame_index
                 filename = os.path.join(self.cached_dir, str(index))
@@ -256,7 +277,13 @@ class CachedBaseEgoDataset(Dataset):
             
             # the only place to call get_additional_info, needs to add to the rest place!
             # TODO
-            data = self.get_additional_info_grid_goal(data)
+            if not self.centerline:
+                data = self.get_additional_info_grid_goal(data)
+            else:
+                # rely on existing pre-computed cache
+                pass
+                # data = self.get_additional_info_centerline_goal(data)
+            
             return data
         else:
             # read from the predefined files
@@ -364,27 +391,31 @@ class CachedBaseEgoDataset(Dataset):
 
         return data
 
+
+
+    
     def get_additional_info_grid_goal(self,data):
         raster_from_world = data["raster_from_world"]
         # assert raster_from_world != None
 
         world_from_raster = np.linalg.inv(raster_from_world)
 
-        target_positions_pixels = transform_points(data["target_positions"], data["raster_from_agent"])
-        original_pixel = target_positions_pixels[0]
+        #target_positions_pixels = transform_points(data["target_positions"], data["raster_from_agent"])
+        #original_pixel = target_positions_pixels[0]
 
+        original_pixel = [28,56]
         centerline_area = []
-        centerline_area.append((original_pixel[0],original_pixel[1]))
+        # centerline_area.append((original_pixel[0],original_pixel[1]))
         #for i in range(0,40,2):
         #    for j in range(-10,10,2):
         #        centerline_area.append((original_pixel[0]+i,original_pixel[1]+j))
         
-        for i in range(10,31,10):
-            for j in range(-10,11,10):
+        for i in range(0,56,2):
+            for j in range(-10,11,2):
                 centerline_area.append((original_pixel[0]+i,original_pixel[1]+j))
  
         GOAL_NUM = len(centerline_area)
-        assert GOAL_NUM == 10
+        # assert GOAL_NUM == 176
         goal_matrix = np.zeros((GOAL_NUM,2),dtype=int)
         for k in range(len(centerline_area)):
             goal_matrix[k,:] = np.array([int(centerline_area[k][0]),int(centerline_area[k][1])])
@@ -401,6 +432,121 @@ class CachedBaseEgoDataset(Dataset):
         else:
             data["goal_gt"] = None
 #            print("None goal gt!")
+
+        y = data["goal_gt"]%11
+        x = (data["goal_gt"]-y)//11
+        data["gt_heatmap"] = gaussian(x, y, 11, 28,sigma=2)
+        
+
+        if gt_goal_positions_pixels[0] < 0:
+            gt_goal_positions_pixels[0] = 0
+        if gt_goal_positions_pixels[0] >= 111:
+            gt_goal_positions_pixels[0] = 111
+        if gt_goal_positions_pixels[1] < 0:
+            gt_goal_positions_pixels[1] = 0
+        if gt_goal_positions_pixels[1] >=111:
+            gt_goal_positions_pixels[1] = 111
+
+        data["goal_pixel"] = gt_goal_positions_pixels
+
+        return data
+    
+     # centerline_goal version
+    def get_additional_info_centerline_goal(self,data):
+        raster_from_world = data["raster_from_world"]
+        world_from_raster = np.linalg.inv(raster_from_world)
+
+        from l5kit.rasterization.semantic_rasterizer import indices_in_bounds
+    
+        rast = self.rasterizer
+        raster_radius = float(np.linalg.norm(rast.raster_size * rast.pixel_size)) / 2
+        center_in_raster_px = np.asarray(rast.raster_size) * (0.5, 0.5)
+        center_in_world = transform_point(center_in_raster_px, world_from_raster)
+        
+        current_positions_pixels = [27,56]  # a bit backward to include the AV stands still
+
+        # TODO, raster_radius/4 to adjust target numbers
+        lane_indices = indices_in_bounds(center_in_world, rast.sem_rast.mapAPI.bounds_info["lanes"]["bounds"], raster_radius)
+
+        
+        # TB Tested
+        #INTERPOLATION_POINTS = 20
+        #lanes_mask: Dict[str, np.ndarray] = defaultdict(lambda: np.zeros(len(lane_indices) * 2, dtype=np.bool))
+        #lanes_area = np.zeros((len(lane_indices) * 2, INTERPOLATION_POINTS, 2))
+
+        tmp_area = []
+     
+        map_api = rast.sem_rast.mapAPI
+        for idx, lane_idx in enumerate(lane_indices):
+            lane_idx = map_api.bounds_info["lanes"]["ids"][lane_idx]
+            
+            lane_dict = map_api.get_lane_coords(lane_idx)
+            
+            xyz_left = lane_dict["xyz_left"]
+            xyz_right = lane_dict["xyz_right"]
+            
+            mid_steps = 3
+            xyz_left = map_api.interpolate(xyz_left, mid_steps, InterpolationMethod.INTER_METER)
+            xyz_right = map_api.interpolate(xyz_right, mid_steps, InterpolationMethod.INTER_METER)
+            if (xyz_left).shape[0] < (xyz_right).shape[0]:
+                xyz_right = xyz_right[:(xyz_left).shape[0]]
+             
+            if (xyz_left).shape[0] > (xyz_right).shape[0]:
+                xyz_left = xyz_left[:(xyz_right).shape[0]]
+            
+            xyz_center = (xyz_left+xyz_right)/2
+            
+            
+        #    xyz_center = self.mapAPI.interpolate(xyz_center, mid_steps, InterpolationMethod.INTER_METER)
+            xyz_center = xyz_center[:,:2]
+            # get_lane_as_interpolation is stateful function
+            # use stateless interpolate instead
+            
+            # if the distance is bigger than TARGET_THRESHOLD
+            TARGET_THRESHOLD = 2
+            """
+            for p in xyz_center:
+                valid = True
+                for q in tmp_area:
+                    d = q-p
+                    dist = sqrt((d[0]*d[0]+d[1]*d[1]))
+                    if dist < TARGET_THRESHOLD:
+                        valid = False
+
+                if valid:
+                    tmp_area.append(p)       
+            """
+            for p in xyz_center:
+                tmp_area.append(p)
+    
+        # tmp_area = centerline_area
+        centerline_area = []
+        # traverse the centerline_area to filter
+        for k in tmp_area:
+            xy_points = (transform_point(k, raster_from_world))
+            if current_positions_pixels[0] < xy_points[0] :
+                centerline_area.append(xy_points)       # add the goals in rasterized images
+
+        # needs to pad equally sized
+        MAX_GOAL_NUM = 1500
+        assert len(centerline_area) < MAX_GOAL_NUM
+
+#        goal_matrix=np.zeros((len(centerline_area),2),dtype=int)
+        goal_matrix = np.zeros((MAX_GOAL_NUM,2),dtype=int)
+        for k in range(len(centerline_area)):
+            goal_matrix[k,:] = np.array([int(centerline_area[k][0]),int(centerline_area[k][1])])
+        data["goal_list"] = goal_matrix
+        data["goal_num"] = len(centerline_area)
+
+        # finding the closest target
+        gt_goal_positions_pixels = transform_point((data["target_positions"][-1,:2]), data["raster_from_agent"])
+        # needs to slice the goal list to avoid using the zero-padded entry
+        xy = (data["goal_list"][:len(centerline_area)]-gt_goal_positions_pixels)
+        
+        if len(xy) != 0:
+            data["goal_gt"] = np.argmin(np.linalg.norm(xy, axis=-1))
+        else:
+            data["goal_gt"] = None
 
         return data
 
@@ -462,6 +608,7 @@ class CachedEgoDataset(CachedBaseEgoDataset):
             preprocessed_path: str = None,
             k = 20,
             augmented: Optional[bool] = False,
+            centerline: bool = False,
     ):
         """
         Get a PyTorch dataset object that can be used to train DNN
@@ -476,7 +623,7 @@ class CachedEgoDataset(CachedBaseEgoDataset):
         self.perturbation = perturbation
         self.rasterizer = rasterizer
         self.augmented = augmented
-        super().__init__(cfg, zarr_dataset, if_preprocess=if_preprocess, preprocessed_path=preprocessed_path, k=k)
+        super().__init__(cfg, zarr_dataset, if_preprocess=if_preprocess, preprocessed_path=preprocessed_path, k=k, centerline=centerline)
 
     def _get_sample_function(self) -> Callable[..., dict]:
         render_context = RenderContext(
