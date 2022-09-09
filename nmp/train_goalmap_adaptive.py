@@ -48,7 +48,20 @@ model = RasterizedTNTWithHistoryStage1Version1(
         )
 """
 
+from model.goal_map import RasterizedGaussianGoalMapWithUNet
 
+model = RasterizedGaussianGoalMapWithUNet(
+        model_arch="unet",
+        num_input_channels=rasterizer.num_channels(),
+        num_targets=3 * cfg["model_params"]["future_num_frames"],  # X, Y, Yaw * number of future states,
+        weights_scaling= [1., 1., 1.],
+#        criterion=nn.L1Loss(reduction="none")
+         criterion=torch.nn.HuberLoss(reduction="none"),
+        # num_history = (cfg["model_params"]["history_num_frames"] + 1)*2 ,
+        num_mlp_hidden = 64
+        )
+
+"""
 from model.goal_map import RasterizedGoalMapAdaptive
 model = RasterizedGoalMapAdaptive(
         model_arch = cfg["model_params"]["model_architecture"],
@@ -60,13 +73,25 @@ model = RasterizedGoalMapAdaptive(
         # num_history = (cfg["model_params"]["history_num_frames"] + 1)*2 ,
         num_mlp_hidden = 64
         )
-
+"""
 
 train_cfg = cfg["train_data_loader"]
 print(train_cfg["batch_size"])
 train_dataloader = DataLoader(train_dataset, shuffle=train_cfg["shuffle"], batch_size=train_cfg["batch_size"],
                              num_workers=train_cfg["num_workers"])
 #device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+
+from utils.imbalanced_sampler import ImbalancedDatasetSampler
+"""
+train_dataloader = DataLoader(
+    train_dataset,
+    shuffle=False,  # cannot shuffle with sampler
+    sampler=ImbalancedDatasetSampler(train_dataset),
+    batch_size=train_cfg["batch_size"],
+    num_workers=0#train_cfg["num_workers"]
+)
+"""
+
 device = "cuda:0"
 #device = "cpu"
 
@@ -87,7 +112,7 @@ val_dataloader = DataLoader(val_dataset, shuffle=val_cfg["shuffle"], batch_size=
                              num_workers=val_cfg["num_workers"])
 
 
-optimizer = optim.Adam(model.parameters(), lr=1e-3)
+optimizer = optim.Adam(model.parameters(), lr=1e-5)
 
 print(optimizer)
 
@@ -113,15 +138,15 @@ for epochs in range(epoch_num):
         optimizer.step()
 
         motion_loss = result["loss2"]
-        motion_loss = np.round(motion_loss.item(),6)
+#        motion_loss = np.round(motion_loss.item(),7)
         target_loss = result["loss1"]
-        target_loss = np.round(target_loss.item(),6)
+        target_loss = np.round(target_loss.item(),7)
  
 
 
         losses_train1.append(loss.item())
-        loss_v = np.round(loss.item(),3)
-        loss_average = np.round(np.mean(losses_train1) ,6)
+        loss_v = np.round(loss.item(),7)
+        loss_average = np.round(np.mean(losses_train1) ,7)
 
 
         loss_avg = loss_avg + loss.item()
@@ -156,7 +181,7 @@ for epochs in range(epoch_num):
             print("val loss: {}".format(loss_average))
             
             if cfg["debug"] == False:
-                torch.save(model.state_dict(),"./planning_goalmap_{}_{}_early_stopping.pt".format(epochs, step))
+                torch.save(model.state_dict(),"./gaussian/unet/planning_goalmap_balanced_{}_{}.pt".format(epochs, step))
 
 
     #loss_avg = loss_avg / step

@@ -1,6 +1,8 @@
 # Config format schema number
 format_version: 4
 
+debug: True
+
 ###################
 ## Model options
 model_params:

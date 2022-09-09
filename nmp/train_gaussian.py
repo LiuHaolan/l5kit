@@ -23,7 +23,9 @@ import os
 os.environ["L5KIT_DATA_FOLDER"] = "/mnt/scratch/v_liuhaolan/l5kit_data"
 dm = LocalDataManager(None)
 # get config
-cfg = load_config_data("/mnt/home/v_liuhaolan/haolan/l5kit/nmp/goal-config-debug.yaml")
+cfg = load_config_data("/mnt/home/v_liuhaolan/haolan/l5kit/nmp/goal-config.yaml")
+
+#cfg["debug"] = True
 
 # rasterisation and perturbation
 rasterizer = build_rasterizer(cfg, dm)
@@ -33,7 +35,9 @@ preprocessed_dir = "/mnt/scratch/v_liuhaolan/preprocessed_goal"
 from l5kit.dataset import CachedEgoDataset
 
 train_zarr = ChunkedDataset(dm.require(cfg["train_data_loader"]["key"])).open()
-train_dataset = CachedEgoDataset(cfg, train_zarr, rasterizer, preprocessed_path=preprocessed_dir)
+train_dataset = CachedEgoDataset(cfg, train_zarr, rasterizer, preprocessed_path=preprocessed_dir, use_mask=False)
+#train_dataset = EgoDataset(cfg, train_zarr, rasterizer)
+
 
 """
 from model.models import RasterizedTNTWithHistoryStage1Version1
@@ -51,7 +55,7 @@ model = RasterizedTNTWithHistoryStage1Version1(
 
 from model.goal_map import RasterizedGaussianGoalMap
 model = RasterizedGaussianGoalMap(
-        model_arch=cfg["model_params"]["model_architecture"],
+        model_arch="resnet50",
         num_input_channels=rasterizer.num_channels(),
         num_targets=3 * cfg["model_params"]["future_num_frames"],  # X, Y, Yaw * number of future states,
         weights_scaling= [1., 1., 1.],
@@ -64,9 +68,22 @@ model = RasterizedGaussianGoalMap(
 
 train_cfg = cfg["train_data_loader"]
 print(train_cfg["batch_size"])
-train_dataloader = DataLoader(train_dataset, shuffle=train_cfg["shuffle"], batch_size=train_cfg["batch_size"],
-                             num_workers=train_cfg["num_workers"])
+#train_dataloader = DataLoader(train_dataset, shuffle=train_cfg["shuffle"], batch_size=train_cfg["batch_size"],
+#                             num_workers=train_cfg["num_workers"])
 #device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+
+from utils.imbalanced_sampler import ImbalancedDatasetSampler
+
+train_dataloader = DataLoader(
+    train_dataset,
+    shuffle=False,  # cannot shuffle with sampler
+    sampler=ImbalancedDatasetSampler(train_dataset),
+    batch_size=train_cfg["batch_size"],
+    num_workers=0#train_cfg["num_workers"]
+)
+
+
+
 device = "cuda:0"
 #device = "cpu"
 
@@ -87,11 +104,11 @@ val_dataloader = DataLoader(val_dataset, shuffle=val_cfg["shuffle"], batch_size=
                              num_workers=val_cfg["num_workers"])
 
 
-optimizer = optim.Adam(model.parameters(), lr=1e-5)
+optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
 print(optimizer)
 
-epoch_num = 8
+epoch_num = 2
 losses_train1 = []
 
 max_val_loss = 100000
@@ -152,7 +169,7 @@ for epochs in range(epoch_num):
             loss_average = loss_val/cnt
             print("val loss: {}".format(loss_average))
             
-            torch.save(model.state_dict(),"./planning_goalmap_focal_lr5_{}_{}.pt".format(epochs,step))
+            torch.save(model.state_dict(),"./gaussian/planning_goalmap.pt".format(epochs,step))
 
 
 

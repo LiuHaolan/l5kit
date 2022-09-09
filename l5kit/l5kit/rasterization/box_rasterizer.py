@@ -246,4 +246,48 @@ class BoxRasterizer(Rasterizer):
 
         return out_im.astype(np.float32) / 255
 
+    def rasterize_ocg(
+            self,
+            history_frames: np.ndarray,
+            future_frames: np.ndarray,
+            future_agents: List[np.ndarray],
+            raster_from_world,
+    ) -> np.ndarray:
+        """Generate groundtruth occupancy grid map coordinates, a list
 
+        :param history_frames: A list of past frames to be rasterized
+        :param history_agents: A list of agents from past frames to be rasterized
+        :param history_tl_faces: A list of traffic light faces from past frames to be rasterized
+        :param agent: The selected agent to be rendered as Ego, if it is None the AV will be rendered as Ego
+        :return: An list of size [2xN] with coordinates of the future agents, where N is number of
+         agents
+        """
+        # all frames are drawn relative to this one"
+        """
+        frame = history_frames[0]
+        ego_translation_m = history_frames[0]["ego_translation"]
+        ego_yaw_rad = rotation33_as_yaw(frame["ego_rotation"])
+
+        raster_from_world = self.render_context.raster_from_world(ego_translation_m, ego_yaw_rad)
+        """
+        
+        # get the id all the vehicle that is in the rasterized image
+        
+        # using them to filter the agents that comes into the perception later
+        
+        # https://github.com/woven-planet/l5kit/blob/master/l5kit/l5kit/sampling/slicing.py#L46
+        # so we should fetch the frame with longest duration
+        # frame = future_frames[-1]
+        if len(future_agents) == 0:
+            return []
+        
+        agents = future_agents[-1]
+        agents = filter_agents_by_labels(agents, self.filter_agents_threshold)
+        
+        agent_world_coords = agents["centroid"][:, None, :2]
+#        box_world_coords = get_box_world_coords(agents)
+        box_raster_coords = transform_points(agent_world_coords.reshape((-1, 2)), raster_from_world)
+
+        
+
+        return box_raster_coords

@@ -471,3 +471,194 @@ def generate_agent_sample_pseudolabel(
     
     return result
 
+def generate_agent_yaw(
+        state_index: int,
+        frames: np.ndarray,
+        agents: np.ndarray,
+        tl_faces: np.ndarray,
+        selected_track_id: Optional[int],
+        render_context: RenderContext,
+        history_num_frames: int,
+        future_num_frames: int,
+        step_time: float,
+        filter_agents_threshold: float,
+        rasterizer: Rasterizer,
+        perturbation: Optional[Perturbation] = None,
+        augmented: Optional[bool] = False,
+) -> dict:
+    """Generates the inputs and targets to train a deep prediction model. A deep prediction model takes as input
+    the state of the world (here: an image we will call the "raster"), and outputs where that agent will be some
+    seconds into the future.
+
+    This function has a lot of arguments and is intended for internal use, you should try to use higher level classes
+    and partials that use this function.
+
+    Args:
+        state_index (int): The anchor frame index, i.e. the "current" timestep in the scene
+        frames (np.ndarray): The scene frames array, can be numpy array or a zarr array
+        agents (np.ndarray): The full agents array, can be numpy array or a zarr array
+        tl_faces (np.ndarray): The full traffic light faces array, can be numpy array or a zarr array
+        selected_track_id (Optional[int]): Either None for AV, or the ID of an agent that you want to
+        predict the future of. This agent is centered in the raster and the returned targets are derived from
+        their future states.
+        render_context (RenderContext): The context for rasterisation
+        history_num_frames (int): Amount of history frames to draw into the rasters
+        future_num_frames (int): Amount of history frames to draw into the rasters
+        step_time (float): seconds between consecutive steps
+        filter_agents_threshold (float): Value between 0 and 1 to use as cutoff value for agent filtering
+        based on their probability of being a relevant agent
+        rasterizer Rasterizer: Rasterizer of some sort that draws a map image
+        perturbation (Optional[Perturbation]): Object that perturbs the input and targets, used
+        to train models that can recover from slight divergence from training set data
+
+    Raises:
+        IndexError: An IndexError is returned if the specified ``selected_track_id`` is not present in the scene
+        or was filtered by applying the ``filter_agent_threshold`` probability filtering.
+
+    Returns:
+        dict: a dict object with the raster array, the future offset coordinates (meters),
+        the future yaw angular offset, the future_availability as a binary mask
+    """
+    (
+        history_frames,
+        future_frames,
+        history_agents,
+        future_agents,
+        history_tl_faces,
+        future_tl_faces,
+    ) = get_agent_context(state_index, frames, agents, tl_faces, history_num_frames, future_num_frames, )
+
+
+    # State you want to predict the future of.
+    cur_frame = history_frames[0]
+    cur_agents = history_agents[0]
+
+    if selected_track_id is None:
+        agent_centroid_m = cur_frame["ego_translation"][:2]
+        agent_yaw_rad = rotation33_as_yaw(cur_frame["ego_rotation"])
+        agent_extent_m = np.asarray((EGO_EXTENT_LENGTH, EGO_EXTENT_WIDTH, EGO_EXTENT_HEIGHT))
+        selected_agent = None
+    else:
+        # this will raise IndexError if the agent is not in the frame or under agent-threshold
+        # this is a strict error, we cannot recover from this situation
+        filtered_agents = filter_agents_by_labels(cur_agents, filter_agents_threshold)
+        agent = filter_agents_by_track_id(filtered_agents, selected_track_id)[0]
+        agent_centroid_m = agent["centroid"]
+        agent_yaw_rad = float(agent["yaw"])
+        agent_extent_m = agent["extent"]
+        selected_agent = agent
+    
+    # the result can be noisy considering perturbation...
+    return agent_yaw_rad
+
+
+def generate_agent_mask(
+        state_index: int,
+        frames: np.ndarray,
+        agents: np.ndarray,
+        tl_faces: np.ndarray,
+        render_context: RenderContext,
+        history_num_frames: int,
+        future_num_frames: int,
+        step_time: float,
+        filter_agents_threshold: float,
+        rasterizer: Rasterizer,
+        data,
+) -> dict:
+    """Generates the mask
+    Args:
+        state_index (int): The anchor frame index, i.e. the "current" timestep in the scene
+        frames (np.ndarray): The scene frames array, can be numpy array or a zarr array
+        agents (np.ndarray): The full agents array, can be numpy array or a zarr array
+        tl_faces (np.ndarray): The full traffic light faces array, can be numpy array or a zarr array
+        selected_track_id (Optional[int]): Either None for AV, or the ID of an agent that you want to
+        predict the future of. This agent is centered in the raster and the returned targets are derived from
+        their future states.
+        render_context (RenderContext): The context for rasterisation
+        history_num_frames (int): Amount of history frames to draw into the rasters
+        future_num_frames (int): Amount of history frames to draw into the rasters
+        step_time (float): seconds between consecutive steps
+        filter_agents_threshold (float): Value between 0 and 1 to use as cutoff value for agent filtering
+        based on their probability of being a relevant agent
+        rasterizer Rasterizer: Rasterizer of some sort that draws a map image
+    Raises:
+        IndexError: An IndexError is returned if the specified ``selected_track_id`` is not present in the scene
+        or was filtered by applying the ``filter_agent_threshold`` probability filtering.
+    Returns:
+        dict: a dict object
+    """
+    (
+        history_frames,
+        future_frames,
+        history_agents,
+        future_agents,
+        history_tl_faces,
+        future_tl_faces,
+    ) = get_agent_context(state_index, frames, agents, tl_faces, history_num_frames, future_num_frames, )
+
+
+    # State you want to predict the future of.
+    cur_frame = history_frames[0]
+    cur_agents = history_agents[0]
+
+    agent_centroid_m = cur_frame["ego_translation"][:2]
+    agent_yaw_rad = rotation33_as_yaw(cur_frame["ego_rotation"])
+    agent_extent_m = np.asarray((EGO_EXTENT_LENGTH, EGO_EXTENT_WIDTH, EGO_EXTENT_HEIGHT))
+    selected_agent = None
+
+    # make sure the rasterizer is sem-box rasterizer
+    #assert 
+    input_im = rasterizer.sem_rast.rasterize_road_mask(history_frames, history_agents, history_tl_faces,data["raster_from_world"], selected_agent)
+    
+    object_list = rasterizer.box_rast.rasterize_ocg(history_frames, future_frames, future_agents, data["raster_from_world"])
+    
+    #print(object_list.shape)
+    
+    N = 100
+    
+    oblist = np.zeros((N,2))
+
+    cnt = 0
+    
+    if len(object_list) != 0:
+
+        # filter some non-usable objects
+        for i in object_list:
+            if i[0] < 28 or i[0] > 84:
+                continue
+            if i[1] < 28 or i[1] > 84:
+                continue
+            oblist[cnt,:] = [i[0],i[1]]
+            cnt = cnt + 1
+
+        obj_num = cnt
+
+        """
+        oblist = np.zeros((N,2))
+        cnt = object_list.shape[0]
+        oblist[:cnt,:] = object_list
+        """
+        #print(oblist.shape)
+
+        """
+        cnt = 0
+        # filter some non-usable objects
+        for i in object_list:
+            if i[0] < 28 or i[0] > 84:
+                continue
+            if i[1] < 28 or i[1] > 84:
+                continue
+            oblist[cnt,:] = [i[0],i[1]]
+            cnt = cnt + 1
+
+        obj_num = cnt
+        """
+        assert N > cnt
+    #    object_list = (object_list + N* [[-10,-10]])[:N]  # padding 
+    
+    result = {
+        "road_mask": input_im,
+        "ocg": oblist,
+        "obj_num": cnt,
+    }
+    return result

@@ -28,12 +28,14 @@ cfg = load_config_data("./goal-config.yaml")
 # rasterisation and perturbation
 rasterizer = build_rasterizer(cfg, dm)
 
-preprocessed_dir = "/mnt/scratch/v_liuhaolan/augmented"
+preprocessed_dir = "/mnt/scratch/v_liuhaolan/preprocessed_goal"
 
 from l5kit.dataset import CachedEgoDataset
 
 train_zarr = ChunkedDataset(dm.require(cfg["train_data_loader"]["key"])).open()
 train_dataset = CachedEgoDataset(cfg, train_zarr, rasterizer, preprocessed_path=preprocessed_dir)
+#train_dataset = EgoDataset(cfg, train_zarr, rasterizer)
+
 
 #from l5kit.planning.rasterized.model import RasterizedPlanningModel
 from model.models import RasterizedImitationModel 
@@ -43,9 +45,12 @@ model = RasterizedImitationModel(
         num_input_channels=rasterizer.num_channels(),
         num_targets=3 * cfg["model_params"]["future_num_frames"],  # X, Y, Yaw * number of future states,
         weights_scaling= [1., 1., 1.],
-        criterion=nn.L1Loss(reduction="none")
+        criterion=nn.MSELoss(reduction="none")
 #         criterion=torch.nn.HuberLoss(reduction="none"),
         )
+
+#model_path
+#model.load
 
 train_cfg = cfg["train_data_loader"]
 print(train_cfg["batch_size"])
@@ -122,7 +127,7 @@ for epochs in range(epoch_num):
     loss1 = 0
     loss2 = 0
 
-    cnt = 1000
+    cnt = 100
     for step,batch in enumerate(val_dataloader):
         # inference pass
         batch = {k: v.to(device) for k, v in batch.items()}
@@ -138,6 +143,6 @@ for epochs in range(epoch_num):
     loss_average = loss_val/cnt
     print("val loss: {}".format(loss_average))
     
-    torch.save(model.state_dict(),"./ckpt/planning_{}_augmented_fixed.pt".format(epochs))
+    torch.save(model.state_dict(),"./consec/planning_{}_imi_l2.pt".format(epochs))
 
 

@@ -9,7 +9,7 @@ from l5kit.data import ChunkedDataset, get_frames_slice_from_scenes
 from l5kit.dataset.utils import convert_str_to_fixed_length_tensor
 from l5kit.kinematic import Perturbation
 from l5kit.rasterization import Rasterizer, RenderContext
-from l5kit.sampling.agent_sampling import generate_agent_sample
+from l5kit.sampling.agent_sampling import generate_agent_sample, generate_agent_mask
 from l5kit.sampling.agent_sampling_vectorized import generate_agent_sample_vectorized
 from l5kit.vectorization.vectorizer import Vectorizer
 
@@ -64,6 +64,7 @@ class CachedBaseEgoDataset(Dataset):
             if_preprocess: bool = False,
             k: int = 20,
             centerline: bool = False,
+            use_mask: bool = True,
     ):
         """
         Get a PyTorch dataset object that can be used to train DNN
@@ -82,6 +83,7 @@ class CachedBaseEgoDataset(Dataset):
        
         # number of frames to pick up  
         self.k = k
+        self.use_mask = use_mask
 
         # the in memory list that keeps the cached data.
         self.cached_item_list = [None]*self.__len__()
@@ -90,7 +92,7 @@ class CachedBaseEgoDataset(Dataset):
         
 #        self.cached_dir = "/home/haolan/Downloads/prediction_dataset/preprocessed"
 
-        self.additional_dir="/mnt/scratch/v_liuhaolan/preprocessed_centerline/"
+        self.additional_dir="/mnt/scratch/v_liuhaolan/mask/"
 
         if self.cfg["debug"]==True:
         # if there is a pre-processed directory, read it into the memory.
@@ -138,7 +140,10 @@ class CachedBaseEgoDataset(Dataset):
                     add_name = os.path.join(self.additional_dir, name)
                     add_handle = open(add_name, "wb")
                     decompressed_res = pickle.loads(zlib.decompress(res))
-                    decompressed_res = self.get_additional_info_centerline_goal(decompressed_res)
+                    #decompressed_res = self.get_additional_info_centerline_goal(decompressed_res)
+                    mask_data = self.get_mask(idx, decompressed_res)
+                    decompressed_res.update(mask_data)
+                    
                     res = zlib.compress(pickle.dumps(decompressed_res))
                     pickle.dump(res, add_handle)  
                     add_handle.close()
@@ -151,7 +156,7 @@ class CachedBaseEgoDataset(Dataset):
         print("preprocess from original dataset!")
         print("not reading the dataset?") 
         return
-        
+
         # the sampled 
         # skip that part
         for scene_index in tqdm(range(len(self.dataset.scenes))):
@@ -284,6 +289,12 @@ class CachedBaseEgoDataset(Dataset):
                 pass
                 # data = self.get_additional_info_centerline_goal(data)
             
+            
+            # add an extra step to fetch mask
+            if self.use_mask:
+                mask_data = self.get_mask(index, data)
+                data.update(mask_data)
+            
             return data
         else:
             # read from the predefined files
@@ -391,7 +402,90 @@ class CachedBaseEgoDataset(Dataset):
 
         return data
 
+    def get_frame_mask(self, scene_index: int, state_index: int, data) -> dict:
+        """
+        A utility function to get additional mask (road, obstacles)
 
+        Args:
+            scene_index (int): the index of the scene in the zarr
+            state_index (int): a relative frame index in the scene
+            track_id (Optional[int]): the agent to rasterize or None for the AV
+        Returns:
+            dict: the rasterised image in (Cx0x1) if the rast is not None, the target trajectory
+            (position and yaw) along with their availability, the 2D matrix to center that agent,
+            the agent track (-1 if ego) and the timestamp
+
+        """
+        frames = self.dataset.frames[get_frames_slice_from_scenes(self.dataset.scenes[scene_index])]
+
+        tl_faces = self.dataset.tl_faces
+        # TODO (@lberg): this should be done in the sample function
+        if self.cfg["raster_params"]["disable_traffic_light_faces"]:
+            tl_faces = np.empty(0, dtype=self.dataset.tl_faces.dtype)  # completely disable traffic light faces
+
+        render_context = RenderContext(
+            raster_size_px=np.array(self.cfg["raster_params"]["raster_size"]),
+            pixel_size_m=np.array(self.cfg["raster_params"]["pixel_size"]),
+            center_in_raster_ratio=np.array(self.cfg["raster_params"]["ego_center"]),
+            set_origin_to_bottom=self.cfg["raster_params"]["set_origin_to_bottom"],
+        )
+
+        sample_function = partial(
+            generate_agent_mask,
+            render_context=render_context,
+            history_num_frames=self.cfg["model_params"]["history_num_frames"],
+            future_num_frames=self.cfg["model_params"]["future_num_frames"],
+            step_time=self.cfg["model_params"]["step_time"],
+            filter_agents_threshold=self.cfg["raster_params"]["filter_agents_threshold"],
+            rasterizer=self.rasterizer,
+        )
+            
+        add_data = sample_function(state_index, frames, self.dataset.agents, tl_faces, data=data)
+
+        return add_data
+    
+    def get_mask(self, index: int, data) -> dict:
+        """
+        Function called by Torch to get an element
+
+        Args:
+            index (int): index of the element to retrieve
+
+        Returns: please look get_frame signature and docstring
+
+        """
+
+        """
+        if index < 0:
+            if -index > len(self):
+                raise ValueError("absolute value of index should not exceed dataset length")
+            index = len(self) + index
+
+        scene_index = bisect.bisect_right(self.cumulative_sizes, index)
+
+        if scene_index == 0:
+            state_index = index
+        else:
+            state_index = index - self.cumulative_sizes[scene_index - 1]
+        """
+        
+        # now a different mapping schemes
+        scene_index = data["scene_index"]
+        
+        interval = index - scene_index*self.k 
+        assert interval == index%self.k
+        #pre_num = self.cumulative_sizes[scene_index]
+        if scene_index == 0:
+            frame_num = self.cumulative_sizes[0]
+        else:
+            frame_num = self.cumulative_sizes[scene_index] - self.cumulative_sizes[scene_index-1]
+
+        frame_num = frame_num - 40
+        state_index = (20 + interval*int(frame_num/self.k))
+        add_data = self.get_frame_mask(scene_index, state_index, data)
+
+        return add_data    
+    
 
     
     def get_additional_info_grid_goal(self,data):
@@ -437,7 +531,6 @@ class CachedBaseEgoDataset(Dataset):
         x = (data["goal_gt"]-y)//11
         data["gt_heatmap"] = gaussian(x, y, 11, 28,sigma=2)
         
-
         if gt_goal_positions_pixels[0] < 0:
             gt_goal_positions_pixels[0] = 0
         if gt_goal_positions_pixels[0] >= 111:
@@ -448,7 +541,11 @@ class CachedBaseEgoDataset(Dataset):
             gt_goal_positions_pixels[1] = 111
 
         data["goal_pixel"] = gt_goal_positions_pixels
-
+        
+        # this code is kinda time consuming....
+        #data["gt_heatmap_full"] = gaussian(gt_goal_positions_pixels[0], gt_goal_positions_pixels[1], 112, 112,sigma=2)
+        
+        
         return data
     
      # centerline_goal version
@@ -609,6 +706,8 @@ class CachedEgoDataset(CachedBaseEgoDataset):
             k = 20,
             augmented: Optional[bool] = False,
             centerline: bool = False,
+            use_mask: bool = True,
+
     ):
         """
         Get a PyTorch dataset object that can be used to train DNN
@@ -623,7 +722,7 @@ class CachedEgoDataset(CachedBaseEgoDataset):
         self.perturbation = perturbation
         self.rasterizer = rasterizer
         self.augmented = augmented
-        super().__init__(cfg, zarr_dataset, if_preprocess=if_preprocess, preprocessed_path=preprocessed_path, k=k, centerline=centerline)
+        super().__init__(cfg, zarr_dataset, if_preprocess=if_preprocess, preprocessed_path=preprocessed_path, k=k, centerline=centerline, use_mask=use_mask)
 
     def _get_sample_function(self) -> Callable[..., dict]:
         render_context = RenderContext(

@@ -49,8 +49,9 @@ model = RasterizedTNTWithHistoryStage1Version1(
 """
 
 
-from model.goal_map import RasterizedGoalMapAdaptive
-model = RasterizedGoalMapAdaptive(
+from model.goal_map import RasterizedGaussianGoalMapWithUNet
+
+model = RasterizedGaussianGoalMapWithUNet(
         model_arch="unet",
         num_input_channels=rasterizer.num_channels(),
         num_targets=3 * cfg["model_params"]["future_num_frames"],  # X, Y, Yaw * number of future states,
@@ -156,6 +157,6 @@ for epochs in range(epoch_num):
     loss_average = loss_val/cnt
     print("val loss: {}".format(loss_average))
     
-    torch.save(model.state_dict(),"./planning_goalmap_{}.pt".format(epochs))
+    torch.save(model.state_dict(),"./gaussian/unet/planning_unet_{}.pt".format(epochs))
 
 

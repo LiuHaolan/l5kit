@@ -69,7 +69,7 @@ class RasterizedImitationModel(nn.Module):
         #self.target_mlp = MLP(in_channels=(2048), out_channels=1, hidden_unit=128)
         
         self.motion_network = MLP(in_channels=(2048), out_channels=num_targets, hidden_unit=64)
-        self.yaw_network = MLP(in_channels=(2048), out_channels=1, hidden_unit=64)
+        #self.yaw_network = MLP(in_channels=(2048), out_channels=1, hidden_unit=64)
 
     def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         # [batch_size, channels, height, width]
@@ -78,7 +78,7 @@ class RasterizedImitationModel(nn.Module):
         embedding = self.model(image_batch)
         
         outputs = self.motion_network(embedding)
-        outputs_yaw = self.yaw_network(embedding)
+        #outputs_yaw = self.yaw_network(embedding)
 
         batch_size = len(data_batch["image"])
 
@@ -99,15 +99,15 @@ class RasterizedImitationModel(nn.Module):
             )
             motion_loss = torch.mean(self.criterion(outputs.view(batch_size,-1), targets) * target_weights)
         
-            yaw_batch = data_batch["yaw"] + data_batch["random_shift"]
+            #yaw_batch = data_batch["yaw"] + data_batch["random_shift"]
             # gt_goals
       #      aux_loss_tensor = (nn.NLLLoss(reduction="none")(target_prediction, data_batch["goal_gt"]))
 
-            aux_loss = nn.L1Loss(reduction="mean")(yaw_batch, outputs_yaw.squeeze())
+            #aux_loss = nn.L1Loss(reduction="mean")(yaw_batch, outputs_yaw.squeeze())
 
-            loss = motion_loss + aux_loss
+            loss = motion_loss# + aux_loss
 
-            train_dict = {"loss": loss, "aux_loss": aux_loss}
+            train_dict = {"loss": loss}
 #            return train_dict
         if not self.training:
 #            predicted = outputs.view(batch_size, -1, 3)

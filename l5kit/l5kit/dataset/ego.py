@@ -9,7 +9,7 @@ from l5kit.data import ChunkedDataset, get_frames_slice_from_scenes
 from l5kit.dataset.utils import convert_str_to_fixed_length_tensor
 from l5kit.kinematic import Perturbation
 from l5kit.rasterization import Rasterizer, RenderContext
-from l5kit.sampling.agent_sampling import generate_agent_sample
+from l5kit.sampling.agent_sampling import generate_agent_sample, generate_agent_mask
 from l5kit.sampling.agent_sampling_vectorized import generate_agent_sample_vectorized
 from l5kit.vectorization.vectorizer import Vectorizer
 
@@ -122,6 +122,7 @@ class BaseEgoDataset(Dataset):
         data = self.get_frame(scene_index, state_index)
 
         return data
+    
     
     def get_scene_dataset(self, scene_index: int) -> "BaseEgoDataset":
         """
@@ -247,6 +248,74 @@ class EgoDataset(BaseEgoDataset):
         dataset = self.dataset.get_scene_dataset(scene_index)
         return EgoDataset(self.cfg, dataset, self.rasterizer, self.perturbation)
 
+    def get_frame_mask(self, scene_index: int, state_index: int, data) -> dict:
+        """
+        A utility function to get additional mask (road, obstacles)
+
+        Args:
+            scene_index (int): the index of the scene in the zarr
+            state_index (int): a relative frame index in the scene
+        Returns:
+            dict: the rasterised image in (Cx0x1) if the rast is not None, the target trajectory
+            (position and yaw) along with their availability, the 2D matrix to center that agent,
+            the agent track (-1 if ego) and the timestamp
+
+        """
+        frames = self.dataset.frames[get_frames_slice_from_scenes(self.dataset.scenes[scene_index])]
+
+        tl_faces = self.dataset.tl_faces
+        # TODO (@lberg): this should be done in the sample function
+        if self.cfg["raster_params"]["disable_traffic_light_faces"]:
+            tl_faces = np.empty(0, dtype=self.dataset.tl_faces.dtype)  # completely disable traffic light faces
+
+        render_context = RenderContext(
+            raster_size_px=np.array(self.cfg["raster_params"]["raster_size"]),
+            pixel_size_m=np.array(self.cfg["raster_params"]["pixel_size"]),
+            center_in_raster_ratio=np.array(self.cfg["raster_params"]["ego_center"]),
+            set_origin_to_bottom=self.cfg["raster_params"]["set_origin_to_bottom"],
+        )
+
+        sample_function = partial(
+            generate_agent_mask,
+            render_context=render_context,
+            history_num_frames=self.cfg["model_params"]["history_num_frames"],
+            future_num_frames=self.cfg["model_params"]["future_num_frames"],
+            step_time=self.cfg["model_params"]["step_time"],
+            filter_agents_threshold=self.cfg["raster_params"]["filter_agents_threshold"],
+            rasterizer=self.rasterizer,
+        )
+            
+        add_data = sample_function(state_index, frames, self.dataset.agents, tl_faces, data=data)
+
+        return add_data
+    
+    def get_mask(self, index: int, data) -> dict:
+        """
+        Function called by Torch to get an element
+
+        Args:
+            index (int): index of the element to retrieve
+
+        Returns: please look get_frame signature and docstring
+
+        """
+
+        if index < 0:
+            if -index > len(self):
+                raise ValueError("absolute value of index should not exceed dataset length")
+            index = len(self) + index
+
+        scene_index = bisect.bisect_right(self.cumulative_sizes, index)
+
+        if scene_index == 0:
+            state_index = index
+        else:
+            state_index = index - self.cumulative_sizes[scene_index - 1]
+        add_data = self.get_frame_mask(scene_index, state_index, data)
+
+        return add_data    
+    
+    
     def __getitem__(self, index: int) -> dict:
         """
         Function called by Torch to get an element
@@ -281,6 +350,9 @@ class EgoDataset(BaseEgoDataset):
             data = self.get_additional_info_grid_goal(data)
         
         # print("data time: {}".format(time.time()-start))
+        
+        add_data = self.get_mask(index, data)
+        data.update(add_data)
 
         return data
 
@@ -442,6 +514,8 @@ class EgoDataset(BaseEgoDataset):
             
         data["goal_pixel"] = (gt_goal_positions_pixels)
 
+#        data["gt_heatmap_full"] = gaussian(gt_goal_positions_pixels[0], gt_goal_positions_pixels[1], 112, 112,sigma=2)
+        
         return data
 
 
