@@ -36,7 +36,7 @@ preprocessed_dir = "/mnt/scratch/v_liuhaolan/mask"
 
 from model.goal_map import RasterizedGaussianGoalMapWithUNetGrid
 
-downweight = 0.8
+downweight = 1.0
 
 print("downweight: {}".format(downweight))
 
@@ -49,8 +49,8 @@ model = RasterizedGaussianGoalMapWithUNetGrid(
          criterion=torch.nn.HuberLoss(reduction="none"),
         # num_history = (cfg["model_params"]["history_num_frames"] + 1)*2 ,
         num_mlp_hidden = 64,
-        weighted = True,
-        downweight = downweight,
+#        weighted = True,
+#        downweight = downweight,
         )
 
 
@@ -198,7 +198,7 @@ for epochs in range(epoch_num):
             print("val loss: {}".format(loss_average))
             
             if cfg["debug"] == False:
-                torch.save(model.state_dict(),"./gaussian/new/planning_{}_{}_mse_weighted_{}.pt".format(epochs, step,downweight))
+                torch.save(model.state_dict(),"./gaussian/new/planning_{}_{}_mse_resnet50_sigma5.pt".format(epochs, step))
 
 
     #loss_avg = loss_avg / step

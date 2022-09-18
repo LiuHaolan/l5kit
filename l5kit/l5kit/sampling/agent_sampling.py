@@ -241,8 +241,8 @@ def generate_agent_sample(
         selected_agent = agent
 
     shift = 0
-    # import time
-    # start = time.time()
+    #import time
+    #start = time.time()
     if not augmented:
         input_im = rasterizer.rasterize(history_frames, history_agents, history_tl_faces, selected_agent)
     else:
@@ -624,10 +624,17 @@ def generate_agent_mask(
 
         # filter some non-usable objects
         for i in object_list:
+            """
+            if i[0] < 0 or i[0] > 112:
+                continue
+            if i[1] < 0 or i[1] > 112:
+                continue
+            """
             if i[0] < 28 or i[0] > 84:
                 continue
             if i[1] < 28 or i[1] > 84:
                 continue
+  
             oblist[cnt,:] = [i[0],i[1]]
             cnt = cnt + 1
 

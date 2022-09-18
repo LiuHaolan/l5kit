@@ -188,6 +188,7 @@ class EgoDataset(BaseEgoDataset):
             perturbation: Optional[Perturbation] = None,
             augmented: Optional[bool] = False,
             centerline :Optional[bool] = False,
+            use_mask :Optional[bool] = True,
     ):
         """
         Get a PyTorch dataset object that can be used to train DNN
@@ -204,6 +205,7 @@ class EgoDataset(BaseEgoDataset):
         self.augmented = augmented
         
         self.centerline = centerline
+        self.use_mask = use_mask
         
         super().__init__(cfg, zarr_dataset)
 
@@ -311,6 +313,8 @@ class EgoDataset(BaseEgoDataset):
             state_index = index
         else:
             state_index = index - self.cumulative_sizes[scene_index - 1]
+            
+            
         add_data = self.get_frame_mask(scene_index, state_index, data)
 
         return add_data    
@@ -351,8 +355,9 @@ class EgoDataset(BaseEgoDataset):
         
         # print("data time: {}".format(time.time()-start))
         
-        add_data = self.get_mask(index, data)
-        data.update(add_data)
+        if self.use_mask:
+            add_data = self.get_mask(index, data)
+            data.update(add_data)
 
         return data
 

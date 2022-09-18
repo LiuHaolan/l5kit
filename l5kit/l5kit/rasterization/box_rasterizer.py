@@ -182,6 +182,37 @@ class BoxRasterizer(Rasterizer):
 
         out_im = (np.clip(out_im_agent + out_im_ego, 0, 1) * 255).astype(np.uint8)
         return out_im
+    
+    def to_rgb_notail(self, in_im: np.ndarray, **kwargs: dict) -> np.ndarray:
+        """This function is used to get an rgb image where agents further in the past have faded colors.
+
+        :param in_im: The output of the rasterize function
+        :param kwargs: This can be used for additional customization (such as colors)
+        :return: An RGB image with agents and ego coloured with fading colors
+        """
+        hist_frames = in_im.shape[-1] // 2
+        in_im = np.transpose(in_im, (2, 0, 1))
+
+        # this is similar to the draw history code
+        out_im_agent = np.zeros((self.raster_size[1], self.raster_size[0], 3), dtype=np.float32)
+        agent_chs = in_im[:hist_frames][::-1]  # reverse to start from the furthest one
+        agent_color = (0, 0, 1) if "agent_color" not in kwargs else kwargs["agent_color"]
+        for ch in agent_chs:
+            out_im_agent *= 0.85  # magic fading constant for the past
+            out_im_agent[ch > 0] = agent_color
+
+        out_im_ego = np.zeros((self.raster_size[1], self.raster_size[0], 3), dtype=np.float32)
+        ego_chs = in_im[hist_frames:][::-1]
+        ego_color = (0, 1, 0) if "ego_color" not in kwargs else kwargs["ego_color"]
+        
+        ch = ego_chs[-1]
+        out_im_ego *= 0.85
+        out_im_ego[ch > 0] = ego_color
+
+        # cancel the rendering of fading color
+        
+        out_im = (np.clip(out_im_agent + out_im_ego, 0, 1) * 255).astype(np.uint8)
+        return out_im
 
     def num_channels(self) -> int:
         return (self.history_num_frames + 1) * 2

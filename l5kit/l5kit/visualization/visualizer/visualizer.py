@@ -83,7 +83,8 @@ def visualize(scene_index: int, frames: List[FrameVisualization]) -> LayoutDOM:
         frame_dict = dict(ego=ColumnDataSource(ego_dict), agents=ColumnDataSource(agents_dict),
                           lanes=ColumnDataSource(lanes_dict),
                           crosswalks=ColumnDataSource(crosswalk_dict))
-        frame_dict.update({k: ColumnDataSource(v) for k, v in trajectory_dict.items()})
+        # try this to not update trajectory
+        # frame_dict.update({k: ColumnDataSource(v) for k, v in trajectory_dict.items()})
 
         out.append(frame_dict)
 
@@ -121,13 +122,13 @@ def visualize(scene_index: int, frames: List[FrameVisualization]) -> LayoutDOM:
             sources["agents"].change.emit();
             sources["ego"].change.emit();
         """
-
+    """
     for trajectory_name in trajectories_labels:
         f.multi_line(alpha=0.8, line_width=3, source=out[0][trajectory_name], color="color",
                      legend_label=trajectory_name)
         js_string += f'sources["{trajectory_name}"].data = frames[cb_obj.value]["{trajectory_name}"].data;\n' \
                      f'sources["{trajectory_name}"].change.emit();\n'
-
+    """
     slider_callback = CustomJS(
         args=dict(figure=f, sources=out[0], frames=out),
         code=js_string,

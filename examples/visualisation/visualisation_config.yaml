@@ -50,7 +50,7 @@ raster_params:
 ###################
 ## Data loader options
 val_data_loader:
-  key: "scenes/train_full.zarr"
+  key: "scenes/validate.zarr"
   batch_size: 12
   shuffle: False
   num_workers: 16
